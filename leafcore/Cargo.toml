@@ -1,0 +1,12 @@
+[package]
+name = "leafcore"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sharks = "0.5.0"
+openssl = "0.10.66"
+tokio = "1.40.0"
+rand = "0.8.5"
+leafpeer = { path = "../leafpeer" }
+
