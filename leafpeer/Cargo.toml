@@ -1,0 +1,18 @@
+[package]
+name = "leafpeer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+local-ip-address = "0.6.1"
+tokio = { version = "1.39.2", features = ["full"] }
+openssl = "0.10.66"
+lazy_static = "1.5.0"
+uuid = "1.10.0"
+async_once = "0.2.6"
+serde = { version = "1.0.205", features = ["derive"] }
+serde_json = "1.0.127"
+
+[lib]
+name = "leafpeer"
+path = "src/lib.rs"
