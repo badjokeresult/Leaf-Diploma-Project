@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub trait ChunksStorage {
     async fn save(&mut self, chunk: &[u8], hash: &[u8]);
     async fn retrieve(&mut self, hash: &[u8]) -> io::Result<Vec<u8>>;
-    fn save_meta_before_shutdown(&self);
+    async fn save_meta_before_shutdown(&self);
 }
 
 const LAST_CHECKPOINT_FILENAME: &str = "last_checkpoint.json";
@@ -76,9 +76,9 @@ impl ChunksStorage for LocalChunksStorage {
         Ok(content_bytes_vec)
     }
 
-    fn save_meta_before_shutdown(&self) {
+    async fn save_meta_before_shutdown(&self) {
         let json = serde_json::to_string(&self).unwrap();
         let folder = self.keeping_dir.parent().unwrap();
-        std::fs::write(folder.join(LAST_CHECKPOINT_FILENAME), json).unwrap();
+        fs::write(folder.join(LAST_CHECKPOINT_FILENAME), json).await.unwrap();
     }
 }
