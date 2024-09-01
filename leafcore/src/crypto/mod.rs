@@ -1,7 +1,7 @@
-use std::io;
+use std::fmt::Debug;
 use std::path::PathBuf;
 
-use tokio::fs;
+use tokio::{fs, io};
 use openssl::aes::{AesKey, aes_ige};
 use openssl::symm::Mode;
 use openssl::rand::rand_priv_bytes;
@@ -21,7 +21,13 @@ impl PasswordFilePathWrapper {
 pub async fn encrypt_chunk(chunk: &[u8]) -> Vec<u8> {
     let password_file = PasswordFilePathWrapper::new();
     let passwd = load_passwd(&password_file.0).await.unwrap();
-    let key = AesKey::new_encrypt(&passwd).unwrap();
+    let key = match AesKey::new_encrypt(&passwd) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("{}", e.to_string());
+            panic!();
+        }
+    };
 
     let mut buf = [0u8; 4096];
     let mut iv = [0u8; 32];
@@ -35,7 +41,13 @@ pub async fn encrypt_chunk(chunk: &[u8]) -> Vec<u8> {
 pub async fn decrypt_chunk(chunk: &[u8]) -> Vec<u8> {
     let password_file = PasswordFilePathWrapper::new();
     let passwd = load_passwd(&password_file.0).await.unwrap();
-    let key = AesKey::new_decrypt(&passwd).unwrap();
+    let key = match AesKey::new_decrypt(&passwd) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("{}", e.to_string());
+            panic!();
+        },
+    };
 
     let mut buf = [0u8; 4096];
     let mut iv = [0u8; 32];
