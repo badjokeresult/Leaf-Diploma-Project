@@ -6,7 +6,12 @@ edition = "2021"
 [dependencies]
 sharks = "0.5.0"
 openssl = "0.10.66"
-tokio = "1.40.0"
+tokio = { version = "1.40.0", features = ["full"] }
 rand = "0.8.5"
-leafpeer = { path = "../leafpeer" }
-
+lazy_static = "1.5.0"
+serde = { version = "1.0.209", features = ["derive"] }
+uuid = { version = "1.10.0", features = ["v4"] }
+local-ip-address = "0.6.2"
+serde_json = "1.0.127"
+async_once = "0.2.6"
+dirs = "5.0.1"
