@@ -1,8 +1,8 @@
 use sharks::{Sharks, Share};
 
 pub trait SecretSharer {
-    fn split_into_chunks(&self, secret: Vec<u8>) -> Vec<Vec<u8>>;
-    fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Vec<u8>;
+    fn split_into_chunks(&self, secret: &[u8]) -> Vec<Vec<u8>>;
+    fn recover_from_chunks(&self, chunks: &[Vec<u8>]) -> Vec<u8>;
 }
 
 pub struct ShamirSecretSharer {
@@ -31,7 +31,7 @@ impl SecretSharer for ShamirSecretSharer {
         chunks_as_bytes
     }
 
-    fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Vec<u8> {
+    fn recover_from_chunks(&self, chunks: &[Vec<u8>]) -> Vec<u8> {
         let mut chunks_as_shares: Vec<Share> = Vec::new();
         for chunk in chunks {
             chunks_as_shares.push(Share::try_from(chunk.as_slice()).unwrap());

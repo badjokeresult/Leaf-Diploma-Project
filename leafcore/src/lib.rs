@@ -1,5 +1,3 @@
-use lazy_static::lazy_static;
-
 mod codec;
 mod crypto;
 mod hash;
@@ -8,30 +6,36 @@ mod peer;
 mod shared_secret;
 mod storage;
 
+use lazy_static::lazy_static;
 use async_once::AsyncOnce;
 use tokio::task;
+use tokio::task::JoinHandle;
 use peer::server::BroadcastServerPeer;
-use crate::peer::client::{BroadcastClientPeer, ClientPeer};
-use crate::peer::server::ServerPeer;
-use crate::shared_secret::{SecretSharer, ShamirSecretSharer};
+use peer::client::{BroadcastClientPeer, ClientPeer};
+use peer::server::ServerPeer;
+use shared_secret::{SecretSharer, ShamirSecretSharer};
 
 lazy_static! {
     static ref PEER_SERVER: AsyncOnce<BroadcastServerPeer> = AsyncOnce::new(async {
         BroadcastServerPeer::new(62092).await
     });
+
+    static ref PEER_CLIENT: AsyncOnce<BroadcastClientPeer> = AsyncOnce::new(async {
+        BroadcastClientPeer::new(62092).await
+    });
 }
 
-pub async fn init() {
+pub async fn init() -> JoinHandle<()> {
     task::spawn(async {
         PEER_SERVER.get().await.listen().await;
-    }).await.unwrap();
+    })
 }
 
 const AMOUNT_OF_CHUNKS: u8 = 5;
 
-pub async fn store_file(content: &[u8]) -> Vec<Vec<u8>> {
+pub async fn store_file(content: Vec<u8>) -> Vec<Vec<u8>> {
     let sharer = ShamirSecretSharer::new(AMOUNT_OF_CHUNKS);
-    let chunks = sharer.split_into_chunks(content);
+    let chunks = sharer.split_into_chunks(&content);
 
     let mut encrypted_chunks = vec![];
     for chunk in &chunks {
@@ -39,21 +43,19 @@ pub async fn store_file(content: &[u8]) -> Vec<Vec<u8>> {
         encrypted_chunks.push(encrypted_chunk);
     }
 
-    let client = BroadcastClientPeer::new(62092).await;
     let mut hashes = vec![];
     for chunk in &encrypted_chunks {
-        let hash = client.send(chunk).await;
+        let hash = PEER_CLIENT.get().await.send(chunk).await;
         hashes.push(hash);
     }
 
     hashes
 }
 
-pub async fn receive_file(hashes: &[[&u8]]) -> Vec<u8> {
-    let client = BroadcastClientPeer::new(62092).await;
+pub async fn receive_file(hashes: Vec<Vec<u8>>) -> Vec<u8> {
     let mut encrypted_chunks = vec![];
-    for hash in hashes {
-        let chunk = client.receive(hash).await;
+    for hash in &hashes {
+        let chunk = PEER_CLIENT.get().await.receive(hash).await;
         encrypted_chunks.push(chunk);
     }
 
@@ -64,6 +66,6 @@ pub async fn receive_file(hashes: &[[&u8]]) -> Vec<u8> {
     }
 
     let sharer = ShamirSecretSharer::new(AMOUNT_OF_CHUNKS);
-    let content = sharer.recover_from_chunks(chunks);
+    let content = sharer.recover_from_chunks(&chunks);
     content
 }

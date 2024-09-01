@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use local_ip_address::{local_broadcast_ip, local_ip};
 use tokio::net::UdpSocket;
-use tokio::task;
 
 use crate::messages::{MessageType, RETRIEVING_REQ_MSG_TYPE, SENDING_REQ_MSG_TYPE};
 use crate::hash;
@@ -85,42 +84,38 @@ impl BroadcastClientPeer {
 
     async fn receive_retrieving_ack(&'static self, hash: &[u8]) -> SocketAddr {
         let mut buf = [0u8; 4096];
-
-        let peer_addr = task::spawn(async move {
-            loop {
-                let (_, addr) = self.socket.recv_from(&mut buf).await.unwrap();
-                let message = codec::decode_message_from_b64_bytes(&mut buf);
-                let recv_hash = match message {
-                    MessageType::RetrievingAck(v) => v,
-                    _ => {
-                        buf.fill(0u8);
-                        continue;
-                    },
-                };
-                if is_hash_equal_to_model(&recv_hash, hash) {
-                    return addr;
-                }
+        let mut peer_addr = None;
+        loop {
+            let (_, addr) = self.socket.recv_from(&mut buf).await.unwrap();
+            let message = codec::decode_message_from_b64_bytes(&mut buf);
+            let recv_hash = match message {
+                MessageType::RetrievingAck(v) => v,
+                _ => {
+                    buf.fill(0u8);
+                    continue;
+                },
+            };
+            if is_hash_equal_to_model(&recv_hash, hash) {
+                peer_addr = Some(addr);
+                break;
             }
-        }).await.unwrap();
+        }
 
-        peer_addr
+        peer_addr.unwrap()
     }
 
     async fn receive_chunk_from_selected_peer(&'static self, addr: SocketAddr) -> Vec<u8> {
-        let buf = task::spawn(async move {
-            let mut buf = [0u8; 4096];
-            loop {
-                let (_, addr_) = self.socket.recv_from(&mut buf).await.unwrap();
-                if !addr_.eq(&addr) {
-                    buf.fill(0u8);
-                    continue;
-                };
-                break;
+        let mut buf = [0u8; 4096];
+        loop {
+            let (_, addr_) = self.socket.recv_from(&mut buf).await.unwrap();
+            if !addr_.eq(&addr) {
+                buf.fill(0u8);
+                continue;
             };
-            let x = buf.to_vec();
-            x
-        }).await.unwrap();
+            break;
+        };
 
-        buf
+        let buf_vec = buf.to_vec();
+        buf_vec
     }
 }

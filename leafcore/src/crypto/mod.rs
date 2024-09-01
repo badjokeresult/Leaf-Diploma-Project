@@ -8,10 +8,19 @@ use openssl::rand::rand_priv_bytes;
 use rand::{Rng, thread_rng};
 use dirs;
 
-const PASSWORD_FILE_PATH: PathBuf = dirs::home_dir().unwrap().join(".leaf").join("passwd.txt");
+struct PasswordFilePathWrapper(pub PathBuf);
+
+impl PasswordFilePathWrapper {
+    fn new() -> PasswordFilePathWrapper {
+        PasswordFilePathWrapper {
+            0: dirs::home_dir().unwrap().join(".leaf").join("passwd.txt"),
+        }
+    }
+}
 
 pub async fn encrypt_chunk(chunk: &[u8]) -> Vec<u8> {
-    let passwd = load_passwd(&PASSWORD_FILE_PATH).await.unwrap();
+    let password_file = PasswordFilePathWrapper::new();
+    let passwd = load_passwd(&password_file.0).await.unwrap();
     let key = AesKey::new_encrypt(&passwd).unwrap();
 
     let mut buf = [0u8; 4096];
@@ -24,7 +33,8 @@ pub async fn encrypt_chunk(chunk: &[u8]) -> Vec<u8> {
 }
 
 pub async fn decrypt_chunk(chunk: &[u8]) -> Vec<u8> {
-    let passwd = load_passwd(&PASSWORD_FILE_PATH).await.unwrap();
+    let password_file = PasswordFilePathWrapper::new();
+    let passwd = load_passwd(&password_file.0).await.unwrap();
     let key = AesKey::new_decrypt(&passwd).unwrap();
 
     let mut buf = [0u8; 4096];
@@ -36,7 +46,7 @@ pub async fn decrypt_chunk(chunk: &[u8]) -> Vec<u8> {
 }
 
 async fn load_passwd(filename: &PathBuf) -> io::Result<Vec<u8>> {
-    if let Err(_) = fs::read_to_string(filename).await.unwrap() {
+    if let Err(_) = fs::read_to_string(filename).await {
         init_password_at_first_launch(filename, 14).await;
     }
     let binding = fs::read_to_string(filename).await.unwrap();

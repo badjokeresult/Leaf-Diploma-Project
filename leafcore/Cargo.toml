@@ -15,6 +15,7 @@ local-ip-address = "0.6.2"
 serde_json = "1.0.127"
 async_once = "0.2.6"
 dirs = "5.0.1"
+atomic_refcell = "0.1.13"
 
 [lib]
 name = "leafcore"
