@@ -24,7 +24,7 @@ pub async fn encrypt_chunk(chunk: &[u8]) -> Vec<u8> {
     let key = match AesKey::new_encrypt(&passwd) {
         Ok(k) => k,
         Err(e) => {
-            eprintln!("{}", e.to_string());
+            eprintln!("{:?}", e);
             panic!();
         }
     };
@@ -44,7 +44,7 @@ pub async fn decrypt_chunk(chunk: &[u8]) -> Vec<u8> {
     let key = match AesKey::new_decrypt(&passwd) {
         Ok(k) => k,
         Err(e) => {
-            eprintln!("{}", e.to_string());
+            eprintln!("{:?}", e);
             panic!();
         },
     };
