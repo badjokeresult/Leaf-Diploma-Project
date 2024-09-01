@@ -47,7 +47,7 @@ pub async fn decrypt_chunk(chunk: &[u8]) -> Vec<u8> {
 
 async fn load_passwd(filename: &PathBuf) -> io::Result<Vec<u8>> {
     if let Err(_) = fs::read_to_string(filename).await {
-        init_password_at_first_launch(filename, 64).await;
+        init_password_at_first_launch(filename, 32).await;
     }
     let binding = fs::read_to_string(filename).await.unwrap();
     let binding = binding.as_bytes();
