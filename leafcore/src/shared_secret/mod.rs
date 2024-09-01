@@ -20,8 +20,8 @@ impl ShamirSecretSharer {
 }
 
 impl SecretSharer for ShamirSecretSharer {
-    fn split_into_chunks(&self, secret: Vec<u8>) -> Vec<Vec<u8>> {
-        let dealer = self.sharks.dealer(&secret);
+    fn split_into_chunks(&self, secret: &[u8]) -> Vec<Vec<u8>> {
+        let dealer = self.sharks.dealer(secret);
         let chunks: Vec<Share> = dealer.take(5).collect();
 
         let mut chunks_as_bytes = vec![];

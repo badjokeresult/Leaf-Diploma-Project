@@ -1,11 +1,8 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use local_ip_address::{local_broadcast_ip, local_ip};
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
 use tokio::task;
 
 use crate::messages::{MessageType, RETRIEVING_REQ_MSG_TYPE, SENDING_REQ_MSG_TYPE};
@@ -64,50 +61,43 @@ impl ClientPeer for BroadcastClientPeer {
 
 impl BroadcastClientPeer {
     async fn receive_sending_ack(&'static self, hash: &[u8]) -> SocketAddr {
-        let buf = Arc::new(Mutex::new([0u8; 4096]));
-        let hash_vec = hash.to_vec();
-        let hash_clone = Arc::new(Mutex::new(hash_vec));
+        let mut buf = [0u8; 4096];
 
-        let peer_addr = task::spawn(async move {
-            loop {
-                let (_, addr) = self.socket.recv_from(buf.lock().await.as_mut()).await.unwrap();
-                let message = codec::decode_message_from_b64_bytes(buf.lock().await.iter().as_slice());
-                let recv_hash = match message {
-                    MessageType::SendingAck(v) => v,
-                    _ => {
-                        buf.lock().await.fill(0u8);
-                        continue
-                    },
-                };
-                let binding = hash_clone.lock().await;
-                let hash_inner = binding.deref();
-                if is_hash_equal_to_model(&recv_hash, &hash_inner) {
-                    return addr;
-                }
+        let mut peer_addr = None;
+        loop {
+            let (_, addr) = self.socket.recv_from(&mut buf).await.unwrap();
+            let message = codec::decode_message_from_b64_bytes(&mut buf);
+            let recv_hash = match message {
+                MessageType::SendingAck(v) => v,
+                _ => {
+                    buf.fill(0u8);
+                    continue
+                },
+            };
+            if is_hash_equal_to_model(&recv_hash, hash) {
+                peer_addr = Some(addr);
+                break;
             }
-        }).await.unwrap();
+        };
 
-        peer_addr
+        peer_addr.unwrap()
     }
 
     async fn receive_retrieving_ack(&'static self, hash: &[u8]) -> SocketAddr {
-        let buf = Arc::new(Mutex::new([0u8; 4096]));
-        let hash_clone = Arc::new(Mutex::new(hash.to_vec()));
+        let mut buf = [0u8; 4096];
 
         let peer_addr = task::spawn(async move {
             loop {
-                let (_, addr) = self.socket.recv_from(buf.lock().await.as_mut_slice()).await.unwrap();
-                let message = codec::decode_message_from_b64_bytes(buf.lock().await.as_slice());
+                let (_, addr) = self.socket.recv_from(&mut buf).await.unwrap();
+                let message = codec::decode_message_from_b64_bytes(&mut buf);
                 let recv_hash = match message {
                     MessageType::RetrievingAck(v) => v,
                     _ => {
-                        buf.lock().await.fill(0u8);
+                        buf.fill(0u8);
                         continue;
                     },
                 };
-                let binding = hash_clone.lock().await;
-                let hash_inner = binding.deref();
-                if is_hash_equal_to_model(&recv_hash, hash_inner) {
+                if is_hash_equal_to_model(&recv_hash, hash) {
                     return addr;
                 }
             }

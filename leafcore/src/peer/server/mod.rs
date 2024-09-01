@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use local_ip_address::local_ip;
 use tokio::sync::Mutex;
-use tokio::task;
 use tokio::net::UdpSocket;
 
 use crate::messages::{MessageType, RETRIEVING_ACK_MSG_TYPE, SENDING_ACK_MSG_TYPE};
@@ -52,7 +51,7 @@ impl ServerPeer for BroadcastServerPeer {
     }
 
     async fn proper_shutdown(&self) {
-        self.storage.lock().await.borrow().save_meta_before_shutdown();
+        self.storage.lock().await.borrow().save_meta_before_shutdown().await;
     }
 }
 
@@ -63,18 +62,15 @@ impl BroadcastServerPeer {
         let socket = SocketAddr::new(ip, self.port);
         self.socket.send_to(&ack_as_b64, socket).await.unwrap();
 
-        let buf = task::spawn(async move {
-            let mut buf = [0u8; 4096];
-            loop {
-                let (_, addr) = self.socket.recv_from(&mut buf).await.unwrap();
-                if !addr.ip().eq(&ip) {
-                    buf.fill(0u8);
-                    continue;
-                }
-                break;
+        let mut buf = [0u8; 4096];
+        loop {
+            let (_, addr) = self.socket.recv_from(&mut buf).await.unwrap();
+            if !addr.ip().eq(&ip) {
+                buf.fill(0u8);
+                continue;
             }
-            buf
-        }).await.unwrap();
+            break;
+        }
 
         self.storage.lock().await.borrow_mut().save(&buf, hash).await;
     }
