@@ -16,6 +16,10 @@ serde_json = "1.0.127"
 async_once = "0.2.6"
 dirs = "5.0.1"
 atomic_refcell = "0.1.13"
+kuznechik = "0.4.0"
+streebog = "0.10.2"
+reed-solomon-erasure = "6.0.0"
+base64 = "0.22.1"
 
 [lib]
 name = "leafcore"
