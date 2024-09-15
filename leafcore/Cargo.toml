@@ -20,6 +20,7 @@ kuznechik = "0.4.0"
 streebog = "0.10.2"
 reed-solomon-erasure = "6.0.0"
 base64 = "0.22.1"
+aes-gcm = "0.10.3"
 
 [lib]
 name = "leafcore"
