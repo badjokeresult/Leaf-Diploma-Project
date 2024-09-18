@@ -20,13 +20,12 @@ pub struct Aes256Encryptor {
 
 impl Aes256Encryptor {
     pub fn new() -> Result<Aes256Encryptor> {
-        let encryptor = Aes256Encryptor {
-            password_file: match PasswordFilePathWrapper::new() {
-                Ok(p) => p,
-                Err(e) => return Err(e),
-            },
-        };
-        Ok(encryptor)
+        match PasswordFilePathWrapper::new() {
+            Ok(p) => Ok(Aes256Encryptor {
+                password_file: p,
+            }),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -72,17 +71,31 @@ pub struct KuznechikEncryptor {
 
 impl KuznechikEncryptor {
     pub fn new() -> Result<KuznechikEncryptor> {
-        let encryptor = KuznechikEncryptor {
-            password_file: match PasswordFilePathWrapper::new() {
-                Ok(p) => p,
-                Err(e) => return Err(e),
+        match PasswordFilePathWrapper::new() {
+            Ok(p) => match GammaFilePathWrapper {
+                Ok(g) => Ok(KuznechikEncryptor {
+                    password_file: p,
+                    gamma_file: g,
+                }),
+                Err(e) => Err(e),
             },
-            gamma_file: match GammaFilePathWrapper::new() {
-                Ok(g) => g,
-                Err(e) => return Err(e),
-            },
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn generate_key(&self) -> Result<AlgOfb> {
+        let password = self.password_file.load_passwd().await?;
+        let gamma = self.gamma_file.load_gamma().await?;
+
+        let password_str = match str::from_utf8(&password) {
+            Ok(s) => s,
+            Err(e) => return Err(Box::new(PasswordFromUtf8Error(e.to_string()))),
         };
-        Ok(encryptor)
+
+        let key = KeyStore::with_password(password_str);
+        let cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
+
+        Ok(cipher)
     }
 }
 
@@ -103,22 +116,5 @@ impl Encryptor for KuznechikEncryptor {
         let decrypted_chunk = cipher.decrypt(data);
 
         Ok(decrypted_chunk)
-    }
-}
-
-impl KuznechikEncryptor {
-    async fn generate_key(&self) -> Result<AlgOfb> {
-        let password = self.password_file.load_passwd().await?;
-        let gamma = self.gamma_file.load_gamma().await?;
-
-        let password_str = match str::from_utf8(&password) {
-            Ok(s) => s,
-            Err(e) => return Err(Box::new(PasswordFromUtf8Error(e.to_string()))),
-        };
-
-        let key = KeyStore::with_password(password_str);
-        let cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
-
-        Ok(cipher)
     }
 }
