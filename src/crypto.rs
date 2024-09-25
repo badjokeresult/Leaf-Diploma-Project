@@ -1,68 +1,12 @@
-use std::fmt::Debug;
-use std::str;
-
-use aes_gcm::{aead::{Aead, AeadCore, KeyInit, OsRng}, Aes256Gcm, Key, Nonce};
 use kuznechik::{AlgOfb, KeyStore, Kuznechik};
+use errors::*;
+use init::*;
 
-use init::PasswordFilePathWrapper;
-use init::GammaFilePathWrapper;
-use super::errors::*;
-
-type Result<T> = std::result::Result<T, Box<dyn CryptoModuleError>>;
+type Result<T> = std::result::Result<T, Box<dyn CryptoError>>;
 
 pub trait Encryptor {
-    async fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8>;
-    async fn decrypt_chunk(&self, chunk: &[u8]) -> Vec<u8>;
-}
-
-pub struct Aes256Encryptor {
-    password_file: PasswordFilePathWrapper,
-}
-
-impl Aes256Encryptor {
-    pub fn new() -> Result<Aes256Encryptor> {
-        match PasswordFilePathWrapper::new() {
-            Ok(p) => Ok(Aes256Encryptor {
-                password_file: p,
-            }),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-impl Encryptor for Aes256Encryptor {
-    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let passwd = self.password_file.load_passwd().await?;
-        let key = Key::<Aes256Gcm>::from_slice(&passwd);
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let cipher = Aes256Gcm::new(key);
-
-        let ciphered_data = match cipher.encrypt(&nonce, chunk) {
-            Ok(d) => d,
-            Err(e) => return Err(Box::new(DataEncryptionError(e.to_string()))),
-        };
-
-        let mut encrypted_data = nonce.to_vec();
-        encrypted_data.extend_from_slice(&ciphered_data);
-
-        Ok(encrypted_data)
-    }
-
-    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let passwd = self.password_file.load_passwd().await?;
-        let key = Key::<Aes256Gcm>::from_slice(&passwd);
-        let (nonce_arr, ciphered_data) = chunk.split_at(12);
-        let nonce = Nonce::from_slice(nonce_arr);
-
-        let cipher = Aes256Gcm::new(key);
-
-        let decrypted_chunk = match cipher.decrypt(nonce, ciphered_data) {
-            Ok(d) => d,
-            Err(e) => return Err(Box::new(DataDecryptionError(e.to_string()))),
-        };
-
-        Ok(decrypted_chunk)
-    }
+    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>>;
+    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>>;
 }
 
 pub struct KuznechikEncryptor {
@@ -120,19 +64,19 @@ impl Encryptor for KuznechikEncryptor {
     }
 }
 
-pub(super) mod init {
+mod init {
     use std::path::PathBuf;
 
     use rand::{Rng, thread_rng};
     use tokio::fs;
 
-    use super::super::errors::*;
+    use super::errors::*;
 
     const WORKING_FOLDER_NAME: &str = ".leaf";
     const PASSWORD_FILE_NAME: &str = "passwd.txt";
     const GAMMA_FILE_NAME: &str = "gamma.bin";
 
-    type Result<T> = std::result::Result<T, Box<dyn CryptoModuleError>>;
+    type Result<T> = std::result::Result<T, Box<dyn CryptoError>>;
 
     pub struct PasswordFilePathWrapper(pub PathBuf);
 
@@ -212,5 +156,13 @@ pub(super) mod init {
             }
         }
     }
+}
 
+mod errors {
+    use std::fmt;
+    use std::fmt::Formatter;
+
+    pub trait CryptoError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
+    }
 }
