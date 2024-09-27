@@ -1,5 +1,3 @@
-mod errors;
-
 use std::cell::RefCell;
 use std::io::Write;
 
@@ -9,7 +7,7 @@ use streebog::{Digest, Oid256, StreebogVarCore};
 
 use errors::*;
 
-pub type Result<T> = std::result::Result<T, Box<dyn HashModuleError>>;
+type Result<T> = std::result::Result<T, Box<dyn HashError>>;
 
 pub trait Hasher {
     fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>>;
@@ -37,4 +35,17 @@ impl Hasher for StreebogHasher {
 
         Ok(result)
     }
+}
+
+mod errors {
+    use std::fmt;
+    use std::fmt::Formatter;
+
+    pub trait HashError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
+    }
+}
+
+mod tests {
+
 }

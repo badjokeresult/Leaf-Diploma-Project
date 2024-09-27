@@ -8,7 +8,7 @@ use errors::*;
 type Result<T> = std::result::Result<T, Box<dyn SecretSharingError>>;
 
 pub trait SecretSharer {
-    fn split_into_chunks(&mut self, secret: &[u8]) -> Result<Vec<Vec<u8>>>;
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>>;
     fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Result<Vec<u8>>;
 }
 
@@ -37,7 +37,7 @@ impl ReedSolomonSecretSharer {
 }
 
 impl SecretSharer for ReedSolomonSecretSharer {
-    fn split_into_chunks(&mut self, secret: &[u8]) -> Result<Vec<Vec<u8>>> {
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>> {
         let block_size = Self::calc_block_size(secret.len());
         if secret.len() % block_size != 0 {
             return Err(Box::new(FileSizeIsNotMultipleToBlockSizeError(secret.len(), block_size)));

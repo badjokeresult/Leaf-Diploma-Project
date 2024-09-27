@@ -1,4 +1,7 @@
+use std::str;
+
 use kuznechik::{AlgOfb, KeyStore, Kuznechik};
+
 use errors::*;
 use init::*;
 
@@ -165,4 +168,53 @@ mod errors {
     pub trait CryptoError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
     }
+
+    #[derive(Debug, Clone)]
+    pub struct PasswordFromUtf8Error(pub String);
+
+    impl CryptoError for PasswordFromUtf8Error {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error getting password from UTF-8 string: {}", self.0)
+        }
+    }
+
+    impl fmt::Display for PasswordFromUtf8Error {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            CryptoError::fmt(self, f)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct UserHomeDirResolvingError;
+
+    impl CryptoError for UserHomeDirResolvingError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error resolving current user home dir: {}", self.0)
+        }
+    }
+
+    impl fmt::Display for UserHomeDirResolvingError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            CryptoError::fmt(self, f)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CredentialsFileInitializationError(pub String);
+
+    impl CryptoError for CredentialsFileInitializationError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error initializing credentials from file: {}", self.0)
+        }
+    }
+
+    impl fmt::Display for CredentialsFileInitializationError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            CryptoError::fmt(self, f)
+        }
+    }
+}
+
+mod tests {
+
 }
