@@ -82,7 +82,7 @@ impl ClientPeer for BroadcastClientPeer {
         let message = match self.codec.encode_message(match &Message::new(
             MessageType::ContentFilled,
             &hash,
-            None,
+            Some(chunk.to_vec()),
         ).as_json() {
             Ok(s) => s,
             Err(_) => return Err(Box::new(BuildingMessageError)),
