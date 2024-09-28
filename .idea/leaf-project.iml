@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="EMPTY_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/leafcore/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/leaffs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/leafpeer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/leaf-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/leaf-common/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/leaf-server/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>
