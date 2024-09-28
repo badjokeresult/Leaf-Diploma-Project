@@ -1,4 +1,3 @@
-use std::hash::Hash;
 use std::net::SocketAddr;
 
 use local_ip_address::{local_broadcast_ip, local_ip};
@@ -42,12 +41,21 @@ impl BroadcastClientPeer {
 
 impl ClientPeer for BroadcastClientPeer {
     async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let hash = self.hasher.calc_hash_for_chunk(chunk).unwrap();
-        let message = self.codec.encode_message(&Message::new(
+        let hash = match self.hasher.calc_hash_for_chunk(chunk) {
+            Ok(h) => h,
+            Err(_) => return Err(Box::new(HashCalculationError)),
+        };
+        let message = match self.codec.encode_message(match &Message::new(
             MessageType::SendingReq,
             &hash,
             None,
-        ).as_json().unwrap()).unwrap();
+        ).as_json() {
+            Ok(s) => s,
+            Err(_) => return Err(Box::new(BuildingMessageError)),
+        }) {
+            Ok(d) => d,
+            Err(_) => return Err(Box::new(BuildingMessageError)),
+        };
         let broadcast_addr = SocketAddr::new(local_broadcast_ip().unwrap(), DEFAULT_SERVER_PORT);
         self.socket.send_to(&message, broadcast_addr).await.unwrap();
 
@@ -55,29 +63,50 @@ impl ClientPeer for BroadcastClientPeer {
         let mut sending_ack_buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
             let (_, addr) = self.socket.recv_from(&mut sending_ack_buf).await.unwrap();
-            let message = Message::from_encoded_json(&sending_ack_buf).unwrap();
+            let message = match Message::from_json(
+                match &self.codec.decode_message(
+                    sending_ack_buf.as_slice(),
+                ) {
+                    Ok(m) => m,
+                    Err(_) => return Err(Box::new(CollectingMessageError)),
+                }) {
+                Ok(m) => m,
+                Err(_) => return Err(Box::new(CollectingMessageError)),
+            };
             if message.hash.eq(&hash) && message.msg_type == MessageType::SendingAck {
                 peer_addr = Some(addr);
                 break;
             }
         };
 
-        let message = self.codec.encode_message(&Message::new(
+        let message = match self.codec.encode_message(match &Message::new(
             MessageType::ContentFilled,
             &hash,
-            Some(chunk.to_vec()),
-        ).as_json().unwrap()).unwrap();
+            None,
+        ).as_json() {
+            Ok(s) => s,
+            Err(_) => return Err(Box::new(BuildingMessageError)),
+        }) {
+            Ok(d) => d,
+            Err(_) => return Err(Box::new(BuildingMessageError)),
+        };
         self.socket.send_to(&message, peer_addr.unwrap()).await.unwrap();
 
         Ok(hash)
     }
 
     async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>> {
-        let message = self.codec.encode_message(&Message::new(
+        let message = match self.codec.encode_message(match &Message::new(
             MessageType::RetrievingReq,
-            hash,
+            &hash,
             None,
-        ).as_json().unwrap()).unwrap();
+        ).as_json() {
+            Ok(s) => s,
+            Err(_) => return Err(Box::new(BuildingMessageError)),
+        }) {
+            Ok(d) => d,
+            Err(_) => return Err(Box::new(BuildingMessageError)),
+        };
         let broadcast_addr = SocketAddr::new(local_broadcast_ip().unwrap(), DEFAULT_SERVER_PORT);
         self.socket.send_to(&message, broadcast_addr).await.unwrap();
 
@@ -85,7 +114,16 @@ impl ClientPeer for BroadcastClientPeer {
         let mut data = None;
         loop {
             let _ = self.socket.recv_from(&mut retrieving_ack_buf).await.unwrap();
-            let message = Message::from_encoded_json(&retrieving_ack_buf).unwrap();
+            let message = match Message::from_json(
+                match &self.codec.decode_message(
+                    retrieving_ack_buf.as_slice(),
+                ) {
+                    Ok(m) => m,
+                    Err(_) => return Err(Box::new(CollectingMessageError)),
+                }) {
+                Ok(m) => m,
+                Err(_) => return Err(Box::new(CollectingMessageError)),
+            };
             if message.msg_type == MessageType::ContentFilled && message.hash.eq(hash) {
                 data = Some(message.data.unwrap());
                 break;
@@ -102,5 +140,50 @@ mod errors {
 
     pub trait ClientPeerError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct HashCalculationError;
+
+    impl ClientPeerError for HashCalculationError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error calculation hash for chunk")
+        }
+    }
+
+    impl fmt::Display for HashCalculationError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            ClientPeerError::fmt(self, f)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct BuildingMessageError;
+
+    impl ClientPeerError for BuildingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error building message")
+        }
+    }
+
+    impl fmt::Display for BuildingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            ClientPeerError::fmt(self, f)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CollectingMessageError;
+
+    impl ClientPeerError for CollectingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error building message")
+        }
+    }
+
+    impl fmt::Display for CollectingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            ClientPeerError::fmt(self, f)
+        }
     }
 }

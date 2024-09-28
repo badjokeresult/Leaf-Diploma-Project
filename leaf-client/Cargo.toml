@@ -11,4 +11,4 @@ ctor = "0.2.8"
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["cdylib"]
+crate-type = ["rlib"]
