@@ -19,37 +19,34 @@ pub struct KuznechikEncryptor {
 
 impl KuznechikEncryptor {
     pub fn new() -> Result<KuznechikEncryptor> {
-        match PasswordFilePathWrapper::new() {
-            Ok(p) => match GammaFilePathWrapper {
-                Ok(g) => Ok(KuznechikEncryptor {
-                    password_file: p,
-                    gamma_file: g,
-                }),
-                Err(e) => Err(e),
-            },
-            Err(e) => Err(e),
-        }
+        let password_file = PasswordFilePathWrapper::new()?;
+        let gamma_file = GammaFilePathWrapper::new()?;
+
+        Ok(KuznechikEncryptor {
+            password_file,
+            gamma_file,
+        })
     }
 
-    async fn generate_key(&self) -> Result<AlgOfb> {
+    async fn load_passwd_gamma(&self) -> Result<(String, Vec<u8>)> {
         let password = self.password_file.load_passwd().await?;
         let gamma = self.gamma_file.load_gamma().await?;
 
-        let password_str = match str::from_utf8(&password) {
-            Ok(s) => s,
+        let password = match str::from_utf8(&password) {
+            Ok(s) => String::from(s),
             Err(e) => return Err(Box::new(PasswordFromUtf8Error(e.to_string()))),
         };
 
-        let key = KeyStore::with_password(password_str);
-        let cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
-
-        Ok(cipher)
+        Ok((password, gamma))
     }
 }
 
 impl Encryptor for KuznechikEncryptor {
     async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let mut cipher = self.generate_key().await?;
+        let (password, gamma) = self.load_passwd_gamma().await?;
+
+        let key = KeyStore::with_password(&password);
+        let mut cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
 
         let data = Vec::from(chunk);
         let encrypted_chunk = cipher.encrypt(data);
@@ -58,7 +55,10 @@ impl Encryptor for KuznechikEncryptor {
     }
 
     async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let mut cipher = self.generate_key().await?;
+        let (password, gamma) = self.load_passwd_gamma().await?;
+
+        let key = KeyStore::with_password(&password);
+        let mut cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
 
         let data = Vec::from(chunk);
         let decrypted_chunk = cipher.decrypt(data);
@@ -86,8 +86,8 @@ mod init {
     impl PasswordFilePathWrapper {
         pub fn new() -> Result<PasswordFilePathWrapper> {
             let filepath = match dirs::home_dir() {
-                Ok(p) => p.join(WORKING_FOLDER_NAME).join(PASSWORD_FILE_NAME),
-                Err(_) => return Err(Box::new(UserHomeDirResolvingError)),
+                Some(p) => p.join(WORKING_FOLDER_NAME).join(PASSWORD_FILE_NAME),
+                None => return Err(Box::new(UserHomeDirResolvingError)),
             };
 
             Ok(PasswordFilePathWrapper {
@@ -99,7 +99,10 @@ mod init {
             if let Err(_) = fs::read_to_string(&self.0).await {
                 self.init_password_at_first_launch(32).await?;
             }
-            let binding = fs::read_to_string(&self.0).await?;
+            let binding = match fs::read_to_string(&self.0).await {
+                Ok(s) => s,
+                Err(e) => return Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
+            };
             let binding = binding.as_bytes();
             let content = binding.to_vec();
 
@@ -127,8 +130,8 @@ mod init {
     impl GammaFilePathWrapper {
         pub fn new() -> Result<GammaFilePathWrapper> {
             let filepath = match dirs::home_dir() {
-                Ok(p) => p.join(WORKING_FOLDER_NAME).join(GAMMA_FILE_NAME),
-                Err(_) => return Err(Box::new(UserHomeDirResolvingError)),
+                Some(p) => p.join(WORKING_FOLDER_NAME).join(GAMMA_FILE_NAME),
+                None => return Err(Box::new(UserHomeDirResolvingError)),
             };
 
             Ok(GammaFilePathWrapper {
@@ -141,7 +144,10 @@ mod init {
                 self.init_gamma_at_first_launch(32).await?;
             }
 
-            let gamma = fs::read_to_string(&self.0).await?;
+            let gamma = match fs::read_to_string(&self.0).await {
+                Ok(s) => s,
+                Err(e) => return Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
+            };
             let gamma = gamma.as_bytes();
             let gamma = gamma.to_vec();
             Ok(gamma)
@@ -189,7 +195,7 @@ mod errors {
 
     impl CryptoError for UserHomeDirResolvingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error resolving current user home dir: {}", self.0)
+            write!(f, "Error resolving current user home dir")
         }
     }
 

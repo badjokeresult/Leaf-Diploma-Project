@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::codec::{Base64Codec, Codec};
-
 use errors::*;
 
 type Result<T> = std::result::Result<T, Box<dyn MessageError>>;
@@ -31,32 +29,18 @@ impl Message {
         }
     }
 
-    pub fn as_encoded_json(&self) -> Result<Vec<u8>> {
-        let b64_encoder: Box<dyn Codec> = Box::new(Base64Codec::new());
-
-        let json = match serde_json::to_string(&self) {
-            Ok(j) => j,
-            Err(e) => return Err(Box::new(MessageSerializationError(e.to_string()))),
-        }.to_string();
-
-        match b64_encoder.encode_message(&json) {
-            Ok(a) => Ok(a),
+    pub fn as_json(&self) -> Result<String> {
+        return match serde_json::to_string(&self) {
+            Ok(j) => Ok(j.to_string()),
             Err(e) => Err(Box::new(MessageSerializationError(e.to_string()))),
-        }
+        };
     }
 
-    pub fn from_encoded_json(data: &[u8]) -> Result<Self> {
-        let b64_encoder: Box<dyn Codec> = Box::new(Base64Codec::new());
-
-        let message: Self = match serde_json::from_str(match &b64_encoder.decode_message(data) {
-            Ok(s) => s,
-            Err(e) => return Err(MessageDeserializationError(e.to_string())),
-        }) {
-            Ok(m) => m,
-            Err(e) => return Err(MessageDeserializationError(e.to_string())),
+    pub fn from_json(message: &str) -> Result<Self> {
+        return match serde_json::from_str(message) {
+            Ok(m) => Ok(m),
+            Err(e) => Err(Box::new(MessageDeserializationError(e.to_string()))),
         };
-
-        Ok(message)
     }
 }
 

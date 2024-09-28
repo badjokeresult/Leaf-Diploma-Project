@@ -1,0 +1,13 @@
+[package]
+name = "leaf-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.40.0", features = ["full"] }
+leaf-common = { path = "../leaf-common" }
+local-ip-address = "0.6.3"
+ctor = "0.2.8"
+
+[lib]
+crate-type = ["cdylib"]

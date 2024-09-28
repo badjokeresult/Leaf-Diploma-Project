@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-use aes_gcm::aead::Buffer;
+
 use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
 
@@ -56,7 +56,13 @@ impl SecretSharer for ReedSolomonSecretSharer {
         let blocks_chunks = buf
             .par_iter()
             .chunks(block_size)
-            .map(|x| Vec::from(*x))
+            .map(|x| {
+                let mut v = vec![];
+                for i in x {
+                    v.push(i.clone());
+                }
+                v
+            })
             .collect::<Vec<_>>();
         for chunk in blocks_chunks {
             blocks.push(chunk);
