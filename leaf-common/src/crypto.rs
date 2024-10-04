@@ -74,10 +74,13 @@ mod init {
     use tokio::fs;
 
     use super::errors::*;
+    use consts::*;
 
-    const WORKING_FOLDER_NAME: &str = ".leaf";
-    const PASSWORD_FILE_NAME: &str = "passwd.txt";
-    const GAMMA_FILE_NAME: &str = "gamma.bin";
+    pub mod consts {
+        pub const WORKING_FOLDER_NAME: &str = ".leaf";
+        pub const PASSWORD_FILE_NAME: &str = "passwd.txt";
+        pub const GAMMA_FILE_NAME: &str = "gamma.bin";
+    }
 
     type Result<T> = std::result::Result<T, Box<dyn CryptoError>>;
 
@@ -99,11 +102,10 @@ mod init {
             if let Err(_) = fs::read_to_string(&self.0).await {
                 self.init_password_at_first_launch(32).await?;
             }
-            let binding = match fs::read_to_string(&self.0).await {
+            let binding = match fs::read(&self.0).await {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
             };
-            let binding = binding.as_bytes();
             let content = binding.to_vec();
 
             Ok(content)
@@ -144,11 +146,10 @@ mod init {
                 self.init_gamma_at_first_launch(32).await?;
             }
 
-            let gamma = match fs::read_to_string(&self.0).await {
+            let gamma = match fs::read(&self.0).await {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
             };
-            let gamma = gamma.as_bytes();
             let gamma = gamma.to_vec();
             Ok(gamma)
         }
@@ -221,6 +222,7 @@ mod errors {
     }
 }
 
+#[cfg(test)]
 mod tests {
 
 }

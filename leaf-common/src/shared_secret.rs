@@ -4,6 +4,7 @@ use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
 
 use errors::*;
+use consts::*;
 
 type Result<T> = std::result::Result<T, Box<dyn SecretSharingError>>;
 
@@ -12,10 +13,12 @@ pub trait SecretSharer {
     fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Result<Vec<u8>>;
 }
 
-const MIN_BLOCK_SIZE: usize = 64;
-const MAX_BLOCK_SIZE: usize = 2 * 1024 * 1024 * 1024;
-const GROWTH_FACTOR: f64 = 0.5;
-const ALIGNMENT: usize = 64;
+pub mod consts {
+    pub const MIN_BLOCK_SIZE: usize = 64;
+    pub const MAX_BLOCK_SIZE: usize = 2 * 1024 * 1024 * 1024;
+    pub const GROWTH_FACTOR: f64 = 0.5;
+    pub const ALIGNMENT: usize = 64;
+}
 
 pub struct ReedSolomonSecretSharer;
 
