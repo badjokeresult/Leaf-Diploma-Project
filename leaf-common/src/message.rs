@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use serde::{Deserialize, Serialize};
 
 use errors::*;
@@ -86,6 +88,18 @@ impl From<u8> for MessageType {
     }
 }
 
+impl Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Message : [ type : {} , hash : {:#?} , data : {:#?} ]", match self.r#type {
+            MessageType::SendingReq => "SendingReq",
+            MessageType::RetrievingReq => "RetrievingReq",
+            MessageType::SendingAck => "SendingAck",
+            MessageType::RetrievingAck => "RetrievingAck",
+            MessageType::ContentFilled => "ContentFilled",
+        }, self.hash, self.data.clone().unwrap())
+    }
+}
+
 pub mod consts {
     pub const SENDING_REQ_MSG_TYPE: u8 = 0;
     pub const RETRIEVING_REQ_MSG_TYPE: u8 = 1;
@@ -94,7 +108,7 @@ pub mod consts {
     pub const CONTENT_FILLED_MSG_TYPE: u8 = 4;
 }
 
-pub mod builder {
+pub mod message_builder {
     use crate::codec::Codec;
     use super::Message;
 
@@ -179,6 +193,7 @@ mod errors {
     }
 }
 
+#[cfg(test)]
 mod tests {
 
 }
