@@ -32,6 +32,10 @@ pub async fn send_file(file_content: Vec<u8>) -> Vec<Vec<u8>> {
         });
     }
 
+    for chunk in &encrypted_chunks {
+        eprintln!("SIZE OF ENCRYPTED CHUNK : {}", chunk.len());
+    }
+
     let client = match BroadcastClientPeer::new().await {
         Ok(c) => c,
         Err(_) => {
