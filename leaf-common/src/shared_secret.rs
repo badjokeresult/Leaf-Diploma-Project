@@ -42,10 +42,6 @@ impl ReedSolomonSecretSharer {
 impl SecretSharer for ReedSolomonSecretSharer {
     fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>> {
         let block_size = Self::calc_block_size(secret.len());
-        if secret.len() % block_size != 0 {
-            eprintln!("SECRET LEN % block_size != 0");
-            return Err(Box::new(FileSizeIsNotMultipleToBlockSizeError(secret.len(), block_size)));
-        }
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size);
         let mut buf = vec![0u8; block_size * amount_of_blocks];
         for i in 0..secret.len() {
