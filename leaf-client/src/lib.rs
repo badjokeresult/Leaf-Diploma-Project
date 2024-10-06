@@ -1,18 +1,34 @@
 mod peer;
 
-use std::io::{Error, ErrorKind};
-
+use leaf_common::{Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
 use peer::{BroadcastClientPeer, ClientPeer};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub async fn send_file(file_content: Vec<u8>) -> Vec<Vec<u8>> {
+    let sharer = ReedSolomonSecretSharer::new();
+    let chunks = match sharer.split_into_chunks(&file_content) {
+        Ok(c) => c,
+        Err(_) => return vec![vec![]],
+    };
 
-pub async fn send_file(file_chunks: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>> {
+    let encryptor = match KuznechikEncryptor::new() {
+        Ok(e) => e,
+        Err(_) => return vec![vec![]],
+    };
+    let mut encrypted_chunks = vec![];
+
+    for chunk in chunks {
+        encrypted_chunks.push(match encryptor.encrypt_chunk(&chunk).await {
+            Ok(c) => c,
+            Err(_) => return vec![vec![]],
+        });
+    }
+
     let client = match BroadcastClientPeer::new().await {
         Ok(c) => c,
-        Err(_) => return Err(Box::new(Error::new(ErrorKind::NotConnected, "Error starting client part"))),
+        Err(_) => return vec![vec![]],
     };
     let mut hashes = vec![];
-    for chunk in file_chunks {
+    for chunk in encrypted_chunks {
         hashes.push(match client.send(&chunk).await {
             Ok(h) => h,
             Err(_) => {
@@ -21,13 +37,13 @@ pub async fn send_file(file_chunks: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>> {
             },
         });
     }
-    Ok(hashes)
+    hashes
 }
 
-pub async fn recv_file(parts_hashes: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>> {
+pub async fn recv_file(parts_hashes: Vec<Vec<u8>>) -> Vec<u8> {
     let client = match BroadcastClientPeer::new().await {
         Ok(c) => c,
-        Err(_) => return Err(Box::new(Error::new(ErrorKind::NotConnected, "Error starting client part"))),
+        Err(_) => return vec![],
     };
     let mut chunks = vec![];
     for hash in parts_hashes {
@@ -39,5 +55,23 @@ pub async fn recv_file(parts_hashes: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>> {
             },
         });
     }
-    Ok(chunks)
+
+    let encryptor = match KuznechikEncryptor::new() {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+    let mut decrypted_chunks = vec![];
+    for chunk in chunks {
+        decrypted_chunks.push(match encryptor.decrypt_chunk(&chunk).await {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        });
+    }
+
+    let sharer = ReedSolomonSecretSharer::new();
+    let content = match sharer.recover_from_chunks(decrypted_chunks) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    content
 }

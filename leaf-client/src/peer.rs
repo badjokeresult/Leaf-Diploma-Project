@@ -110,10 +110,11 @@ mod consts {
 
 mod errors {
     use std::fmt;
-    use std::fmt::Formatter;
+    use std::fmt::{Display, Formatter};
 
     pub trait ClientPeerError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
+        fn to_string(&self) -> String;
     }
 
     #[derive(Debug, Clone)]
@@ -122,6 +123,10 @@ mod errors {
     impl ClientPeerError for HashCalculationError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "Error calculation hash for chunk")
+        }
+
+        fn to_string(&self) -> String {
+            String::from("Error calculation hash for chunk")
         }
     }
 
@@ -138,6 +143,9 @@ mod errors {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "Error building message")
         }
+        fn to_string(&self) -> String {
+            String::from("Error building message")
+        }
     }
 
     impl fmt::Display for BuildingMessageError {
@@ -151,7 +159,11 @@ mod errors {
 
     impl ClientPeerError for CollectingMessageError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error building message")
+            write!(f, "Error collecting message")
+        }
+
+        fn to_string(&self) -> String {
+            String::from("Error collecting message")
         }
     }
 
