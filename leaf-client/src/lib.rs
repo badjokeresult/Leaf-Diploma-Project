@@ -12,7 +12,7 @@ pub async fn send_file(file_content: Vec<u8>) -> Vec<Vec<u8>> {
             return vec![vec![]];
         },
     };
-
+    eprintln!("LEN OF CHUNKS : {}", chunks.len());
     let encryptor = match KuznechikEncryptor::new() {
         Ok(e) => e,
         Err(_) => {
