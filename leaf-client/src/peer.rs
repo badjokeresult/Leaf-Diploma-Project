@@ -44,11 +44,17 @@ impl ClientPeer for BroadcastClientPeer {
     async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>> {
         let hash = match self.hasher.calc_hash_for_chunk(chunk) {
             Ok(h) => h,
-            Err(_) => return Err(Box::new(HashCalculationError)),
+            Err(_) => {
+                eprintln!("ERROR CALC HASH");
+                return Err(Box::new(HashCalculationError));
+            },
         };
         let message = match message_builder::build_encoded_message(&self.codec, SENDING_REQ_MSG_TYPE, &hash, None) {
             Ok(m) => m,
-            Err(_) => return Err(Box::new(BuildingMessageError))
+            Err(_) => {
+                eprintln!("ERROR BUILDING SENDING_REQ MESSAGE");
+                return Err(Box::new(BuildingMessageError));
+            }
         };
         let broadcast_addr = SocketAddr::new(local_broadcast_ip().unwrap(), DEFAULT_SERVER_PORT);
         self.socket.send_to(&message, broadcast_addr).await.unwrap();
@@ -59,7 +65,10 @@ impl ClientPeer for BroadcastClientPeer {
             let (_, addr) = self.socket.recv_from(&mut sending_ack_buf).await.unwrap();
             let message = match message_builder::get_decode_message(&self.codec, &sending_ack_buf) {
                 Ok(m) => m,
-                Err(_) => return Err(Box::new(CollectingMessageError))
+                Err(_) => {
+                    eprintln!("ERROR DECODING MESSAGE");
+                    return Err(Box::new(CollectingMessageError));
+                }
             };
             let msg_u8: u8 = message.get_type();
             if  msg_u8 == SENDING_ACK_MSG_TYPE && message.get_hash().eq(&hash) {
@@ -70,7 +79,10 @@ impl ClientPeer for BroadcastClientPeer {
 
         let message = match message_builder::build_encoded_message(&self.codec, CONTENT_FILLED_MSG_TYPE, &hash, Some(chunk.to_vec())) {
             Ok(m) => m,
-            Err(_) => return Err(Box::new(BuildingMessageError))
+            Err(_) => {
+                eprintln!("ERROR BUILDING SENDING_REQ MESSAGE");
+                return Err(Box::new(BuildingMessageError));
+            }
         };
         self.socket.send_to(&message, peer_addr.unwrap()).await.unwrap();
 
