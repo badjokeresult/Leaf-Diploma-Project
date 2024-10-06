@@ -49,9 +49,9 @@ impl Encryptor for KuznechikEncryptor {
         let mut cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
 
         eprintln!("LEN OF SLICE CHUNK : {}", chunk.len());
-        let data = Vec::from(chunk);
+        let mut data = Vec::from(chunk);
         eprintln!("LEN OF VEC CHUNK : {}", data.len());
-        let encrypted_chunk = cipher.encrypt(data.clone());
+        let encrypted_chunk = cipher.encrypt(data);
 
         Ok(encrypted_chunk)
     }
