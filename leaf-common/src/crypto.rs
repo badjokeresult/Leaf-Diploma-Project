@@ -51,7 +51,7 @@ impl Encryptor for KuznechikEncryptor {
         eprintln!("LEN OF SLICE CHUNK : {}", chunk.len());
         let data = Vec::from(chunk);
         eprintln!("LEN OF VEC CHUNK : {}", data.len());
-        let encrypted_chunk = cipher.encrypt(data);
+        let encrypted_chunk = cipher.encrypt(data.clone());
 
         Ok(encrypted_chunk)
     }
