@@ -7,25 +7,37 @@ pub async fn send_file(file_content: Vec<u8>) -> Vec<Vec<u8>> {
     let sharer = ReedSolomonSecretSharer::new();
     let chunks = match sharer.split_into_chunks(&file_content) {
         Ok(c) => c,
-        Err(_) => return vec![vec![]],
+        Err(_) => {
+            eprintln!("ERROR SPLITTING INTO CHUNKS");
+            return vec![vec![]];
+        },
     };
 
     let encryptor = match KuznechikEncryptor::new() {
         Ok(e) => e,
-        Err(_) => return vec![vec![]],
+        Err(_) => {
+            eprintln!("ERROR INIT ENCRYPTOR");
+            return vec![vec![]];
+        },
     };
     let mut encrypted_chunks = vec![];
 
     for chunk in chunks {
         encrypted_chunks.push(match encryptor.encrypt_chunk(&chunk).await {
             Ok(c) => c,
-            Err(_) => return vec![vec![]],
+            Err(_) => {
+                eprintln!("ERROR ENCRYPTING CHUNK");
+                return vec![vec![]];
+            },
         });
     }
 
     let client = match BroadcastClientPeer::new().await {
         Ok(c) => c,
-        Err(_) => return vec![vec![]],
+        Err(_) => {
+            eprintln!("ERROR INIT CLIENT");
+            return vec![vec![]];
+        },
     };
     let mut hashes = vec![];
     for chunk in encrypted_chunks {
