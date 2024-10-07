@@ -36,7 +36,7 @@ pub async fn send_file(file_content: Vec<u8>) -> Vec<Vec<u8>> {
         eprintln!("SIZE OF ENCRYPTED CHUNK : {}", chunk.len());
     }
 
-    let client = match BroadcastClientPeer::new().await {
+    let client = match BroadcastClientPeer::new() {
         Ok(c) => c,
         Err(_) => {
             eprintln!("ERROR INIT CLIENT");
@@ -44,26 +44,26 @@ pub async fn send_file(file_content: Vec<u8>) -> Vec<Vec<u8>> {
         },
     };
     let mut hashes = vec![];
-    for chunk in encrypted_chunks {
-        hashes.push(match client.send(&chunk).await {
-            Ok(h) => h,
-            Err(_) => {
-                eprintln!("Error sending chunk into domain: {:#?}", &chunk);
-                continue;
-            },
-        });
-    }
+    eprintln!("LEN OF ENCRYPTED_CHUNKS : {}", encrypted_chunks.len());
+    let hash = match client.send(&encrypted_chunks[0]) {
+        Ok(h) => h,
+        Err(_) => {
+            eprintln!("Error sending chunk into domain: {:#?}", &encrypted_chunks[0]);
+            return vec![vec![]];
+        },
+    };
+    hashes.push(hash);
     hashes
 }
 
 pub async fn recv_file(parts_hashes: Vec<Vec<u8>>) -> Vec<u8> {
-    let client = match BroadcastClientPeer::new().await {
+    let client = match BroadcastClientPeer::new() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
     let mut chunks = vec![];
     for hash in parts_hashes {
-        chunks.push(match client.recv(&hash).await {
+        chunks.push(match client.recv(&hash) {
             Ok(c) => c,
             Err(_) => {
                 eprintln!("Error receiving data by hash: {:#?}", &hash);

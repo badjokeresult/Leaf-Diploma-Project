@@ -110,12 +110,13 @@ pub mod consts {
 
 pub mod message_builder {
     use crate::codec::Codec;
+    use crate::DeflateCodec;
     use super::Message;
 
     use super::errors::*;
     use super::Result;
 
-    pub fn build_encoded_message(codec: &Box<dyn Codec>, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>> {
+    pub fn build_encoded_message(codec: &DeflateCodec, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>> {
         match Message::new(msg_type, hash, data) {
             Ok(m) => match m.as_json() {
                 Ok(j) => match codec.encode_message(&j) {
@@ -128,7 +129,7 @@ pub mod message_builder {
         }
     }
 
-    pub fn get_decode_message(codec: &Box<dyn Codec>, buf: &[u8]) -> Result<Message> {
+    pub fn get_decode_message(codec: &DeflateCodec, buf: &[u8]) -> Result<Message> {
         match codec.decode_message(buf) {
             Ok(s) => match Message::from_json(&s) {
                 Ok(m) => Ok(m),

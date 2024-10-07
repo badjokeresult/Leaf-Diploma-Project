@@ -1,10 +1,8 @@
-use std::fs;
-use leaf_client::*;
+use tokio::net::UdpSocket;
 
 #[tokio::main]
 async fn main() {
-    let content = fs::read("test.txt").unwrap();
-    println!("LEN CONTENT : {}", content.len());
-    let hashes = send_file(content).await;
-    println!("HASHES COUNT : {}", hashes.len());
+    let socket = UdpSocket::bind("192.168.124.1:62092").await.unwrap();
+    socket.set_broadcast(true).unwrap();
+    socket.send_to(b"Hello world", "192.168.124.255:62092").await.unwrap();
 }

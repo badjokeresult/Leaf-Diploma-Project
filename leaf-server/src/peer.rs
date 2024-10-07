@@ -40,6 +40,11 @@ impl BroadcastServerPeer {
             Err(e) => return Err(Box::new(SocketBindingError(e.to_string()))),
         };
 
+        match socket.set_broadcast(true) {
+            Ok(_) => {},
+            Err(e) => eprintln!("ERROR : {}", e.to_string()),
+        }
+
         let storage = RefCell::new(match BroadcastServerStorage::new().await {
             Ok(s) => s,
             Err(_) => return Err(Box::new(StorageInitError)),
