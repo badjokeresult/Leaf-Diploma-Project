@@ -7,11 +7,9 @@ use flate2::Compression;
 
 use errors::*;
 
-type Result<T> = std::result::Result<T, Box<dyn CodecError>>;
-
 pub trait Codec {
-    fn encode_message(&self, message: &str) -> Result<Vec<u8>>;
-    fn decode_message(&self, message: &[u8]) -> Result<String>;
+    fn encode_message(&self, message: &str) -> Result<Vec<u8>, DataEncodingError>;
+    fn decode_message(&self, message: &[u8]) -> Result<String, DataDecodingError>;
 }
 
 pub struct DeflateCodec {
@@ -27,24 +25,24 @@ impl DeflateCodec {
 }
 
 impl Codec for DeflateCodec {
-    fn encode_message(&self, message: &str) -> Result<Vec<u8>> {
+    fn encode_message(&self, message: &str) -> Result<Vec<u8>, DataEncodingError> {
         let mut encoder = ZlibEncoder::new(Vec::new(), self.compression);
         return match encoder.write_all(message.as_bytes()) {
             Ok(_) => match encoder.finish() {
                 Ok(d) => Ok(d),
-                Err(e) => Err(Box::new(DeflateEncodingError(e.to_string()))),
+                Err(e) => Err(DataEncodingError(e.to_string())),
             },
-            Err(e) => Err(Box::new(DeflateDecodingError(e.to_string()))),
+            Err(e) => Err(DataEncodingError(e.to_string())),
         }
     }
 
-    fn decode_message(&self, message: &[u8]) -> Result<String> {
+    fn decode_message(&self, message: &[u8]) -> Result<String, DataDecodingError> {
         let mut decoder = ZlibDecoder::new(message);
         let mut decoded_message = String::new();
 
         match decoder.read_to_string(&mut decoded_message) {
             Ok(_) => Ok(decoded_message),
-            Err(e) => Err(Box::new(DeflateDecodingError(e.to_string()))),
+            Err(e) => Err(DataDecodingError(e.to_string())),
         }
     }
 }
@@ -53,52 +51,21 @@ mod errors {
     use std::fmt;
     use std::fmt::Formatter;
 
-    pub trait CodecError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
-    }
-
     #[derive(Debug, Clone)]
-    pub struct FromBase64DecodingError(pub String);
+    pub struct DataEncodingError(pub String);
 
-    impl CodecError for FromBase64DecodingError {
+    impl fmt::Display for DataEncodingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error decoding from base64: {}", self.0)
-        }
-    }
-
-    impl fmt::Display for FromBase64DecodingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            CodecError::fmt(self, f)
+            write!(f, "Error encoding data: {}", self.0)
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct DeflateEncodingError(pub String);
+    pub struct DataDecodingError(pub String);
 
-    impl CodecError for DeflateEncodingError {
+    impl fmt::Display for DataDecodingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error encoding with deflate: {}", self.0)
-        }
-    }
-
-    impl fmt::Display for DeflateEncodingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            CodecError::fmt(self, f)
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct DeflateDecodingError(pub String);
-
-    impl CodecError for DeflateDecodingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error decoding from deflate: {}", self.0)
-        }
-    }
-
-    impl fmt::Display for DeflateDecodingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            CodecError::fmt(self, f)
+            write!(f, "Error decoding data: {}", self.0)
         }
     }
 }
