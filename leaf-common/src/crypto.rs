@@ -5,11 +5,9 @@ use kuznechik::{AlgOfb, KeyStore, Kuznechik};
 use errors::*;
 use init::*;
 
-type Result<T> = std::result::Result<T, Box<dyn CryptoError>>;
-
 pub trait Encryptor {
-    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>>;
-    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>>;
+    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError>;
+    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError>;
 }
 
 pub struct KuznechikEncryptor {
@@ -18,9 +16,15 @@ pub struct KuznechikEncryptor {
 }
 
 impl KuznechikEncryptor {
-    pub fn new() -> Result<KuznechikEncryptor> {
-        let password_file = PasswordFilePathWrapper::new()?;
-        let gamma_file = GammaFilePathWrapper::new()?;
+    pub fn new() -> Result<KuznechikEncryptor, InitializeEncryptorError> {
+        let password_file = match PasswordFilePathWrapper::new() {
+            Ok(p) => p,
+            Err(e) => return Err(InitializeEncryptorError(e.to_string())),
+        };
+        let gamma_file = match GammaFilePathWrapper::new() {
+            Ok(g) => g,
+            Err(e) => return Err(InitializeEncryptorError(e.to_string())),
+        };
 
         Ok(KuznechikEncryptor {
             password_file,
@@ -28,13 +32,19 @@ impl KuznechikEncryptor {
         })
     }
 
-    async fn load_passwd_gamma(&self) -> Result<(String, Vec<u8>)> {
-        let password = self.password_file.load_passwd().await?;
-        let gamma = self.gamma_file.load_gamma().await?;
+    async fn load_passwd_gamma(&self) -> Result<(String, Vec<u8>), LoadingCredentialsError> {
+        let password = match self.password_file.load_passwd().await {
+            Ok(p) => p,
+            Err(e) => return Err(LoadingCredentialsError(e.to_string())),
+        };
+        let gamma = match self.gamma_file.load_gamma().await {
+            Ok(g) => g,
+            Err(e) => return Err(LoadingCredentialsError(e.to_string())),
+        };
 
         let password = match str::from_utf8(&password) {
             Ok(s) => String::from(s),
-            Err(e) => return Err(Box::new(PasswordFromUtf8Error(e.to_string()))),
+            Err(e) => return Err(LoadingCredentialsError(e.to_string())),
         };
 
         Ok((password, gamma))
@@ -42,22 +52,26 @@ impl KuznechikEncryptor {
 }
 
 impl Encryptor for KuznechikEncryptor {
-    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let (password, gamma) = self.load_passwd_gamma().await?;
+    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError> {
+        let (password, gamma) = match self.load_passwd_gamma().await {
+            Ok((p, g)) => (p, g),
+            Err(e) => return Err(DataEncryptionError(e.to_string())),
+        };
 
         let key = KeyStore::with_password(&password);
         let mut cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
 
-        eprintln!("LEN OF SLICE CHUNK : {}", chunk.len());
-        let mut data = Vec::from(chunk);
-        eprintln!("LEN OF VEC CHUNK : {}", data.len());
+        let data = Vec::from(chunk);
         let encrypted_chunk = cipher.encrypt(data);
 
         Ok(encrypted_chunk)
     }
 
-    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
-        let (password, gamma) = self.load_passwd_gamma().await?;
+    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError> {
+        let (password, gamma) = match self.load_passwd_gamma().await {
+            Ok((p, g)) => (p, g),
+            Err(e) => return Err(DataDecryptionError(e.to_string())),
+        };
 
         let key = KeyStore::with_password(&password);
         let mut cipher = AlgOfb::new(&key).gamma(gamma.to_vec());
@@ -84,15 +98,13 @@ mod init {
         pub const GAMMA_FILE_NAME: &str = "gamma.bin";
     }
 
-    type Result<T> = std::result::Result<T, Box<dyn CryptoError>>;
-
     pub struct PasswordFilePathWrapper(pub PathBuf);
 
     impl PasswordFilePathWrapper {
-        pub fn new() -> Result<PasswordFilePathWrapper> {
+        pub fn new() -> Result<PasswordFilePathWrapper, UserHomeDirResolvingError> {
             let filepath = match dirs::home_dir() {
                 Some(p) => p.join(WORKING_FOLDER_NAME).join(PASSWORD_FILE_NAME),
-                None => return Err(Box::new(UserHomeDirResolvingError)),
+                None => return Err(UserHomeDirResolvingError),
             };
 
             Ok(PasswordFilePathWrapper {
@@ -100,20 +112,23 @@ mod init {
             })
         }
 
-        pub async fn load_passwd(&self) -> Result<Vec<u8>> {
+        pub async fn load_passwd(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
             if let Err(_) = fs::read_to_string(&self.0).await {
-                self.init_password_at_first_launch(32).await?;
+                match self.init_password_at_first_launch(32).await {
+                    Ok(_) => {},
+                    Err(e) => return Err(LoadingCredentialsError(e.to_string())),
+                };
             }
             let binding = match fs::read(&self.0).await {
                 Ok(s) => s,
-                Err(e) => return Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
+                Err(e) => return Err(LoadingCredentialsError(e.to_string())),
             };
             let content = binding.to_vec();
 
             Ok(content)
         }
 
-        async fn init_password_at_first_launch(&self, len: usize) -> Result<()> {
+        async fn init_password_at_first_launch(&self, len: usize) -> Result<(), InitializingCredentialsError> {
             let password: String = thread_rng()
                 .sample_iter::<u8, _>(rand::distributions::Alphanumeric)
                 .take(len)
@@ -124,7 +139,7 @@ mod init {
 
             match fs::write(&self.0, password_as_bytes).await {
                 Ok(_) => Ok(()),
-                Err(e) => Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
+                Err(e) => Err(InitializingCredentialsError(e.to_string())),
             }
         }
     }
@@ -132,10 +147,10 @@ mod init {
     pub struct GammaFilePathWrapper(pub PathBuf);
 
     impl GammaFilePathWrapper {
-        pub fn new() -> Result<GammaFilePathWrapper> {
+        pub fn new() -> Result<GammaFilePathWrapper, UserHomeDirResolvingError> {
             let filepath = match dirs::home_dir() {
                 Some(p) => p.join(WORKING_FOLDER_NAME).join(GAMMA_FILE_NAME),
-                None => return Err(Box::new(UserHomeDirResolvingError)),
+                None => return Err(UserHomeDirResolvingError),
             };
 
             Ok(GammaFilePathWrapper {
@@ -143,20 +158,23 @@ mod init {
             })
         }
 
-        pub async fn load_gamma(&self) -> Result<Vec<u8>> {
+        pub async fn load_gamma(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
             if let Err(_) = fs::read_to_string(&self.0).await {
-                self.init_gamma_at_first_launch(32).await?;
+                match self.init_gamma_at_first_launch(32).await {
+                    Ok(_) => {},
+                    Err(e) => return Err(LoadingCredentialsError(e.to_string())),
+                };
             }
 
             let gamma = match fs::read(&self.0).await {
                 Ok(s) => s,
-                Err(e) => return Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
+                Err(e) => return Err(LoadingCredentialsError(e.to_string())),
             };
             let gamma = gamma.to_vec();
             Ok(gamma)
         }
 
-        async fn init_gamma_at_first_launch(&self, len: usize) -> Result<()> {
+        async fn init_gamma_at_first_launch(&self, len: usize) -> Result<(), InitializingCredentialsError> {
             let gamma: Vec<u8> = thread_rng()
                 .sample_iter::<u8, _>(rand::distributions::Standard)
                 .take(len)
@@ -164,7 +182,7 @@ mod init {
 
             match fs::write(&self.0, &gamma).await {
                 Ok(_) => Ok(()),
-                Err(e) => Err(Box::new(CredentialsFileInitializationError(e.to_string()))),
+                Err(e) => Err(InitializingCredentialsError(e.to_string())),
             }
         }
     }
@@ -174,52 +192,57 @@ mod errors {
     use std::fmt;
     use std::fmt::Formatter;
 
-    pub trait CryptoError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct PasswordFromUtf8Error(pub String);
-
-    impl CryptoError for PasswordFromUtf8Error {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error getting password from UTF-8 string: {}", self.0)
-        }
-    }
-
-    impl fmt::Display for PasswordFromUtf8Error {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            CryptoError::fmt(self, f)
-        }
-    }
-
     #[derive(Debug, Clone)]
     pub struct UserHomeDirResolvingError;
 
-    impl CryptoError for UserHomeDirResolvingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error resolving current user home dir")
-        }
-    }
-
     impl fmt::Display for UserHomeDirResolvingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            CryptoError::fmt(self, f)
+            write!(f, "Error resolving user home dir")
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct CredentialsFileInitializationError(pub String);
+    pub struct InitializeEncryptorError(pub String);
 
-    impl CryptoError for CredentialsFileInitializationError {
+    impl fmt::Display for InitializeEncryptorError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error initializing credentials from file: {}", self.0)
+            write!(f, "Error initialize encryptor: {}", self.0)
         }
     }
 
-    impl fmt::Display for CredentialsFileInitializationError {
+    #[derive(Debug, Clone)]
+    pub struct LoadingCredentialsError(pub String);
+
+    impl fmt::Display for LoadingCredentialsError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            CryptoError::fmt(self, f)
+            write!(f, "Error loading credentials: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct DataEncryptionError(pub String);
+
+    impl fmt::Display for DataEncryptionError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error encrypting data: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct DataDecryptionError(pub String);
+
+    impl fmt::Display for DataDecryptionError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error decrypting data: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct InitializingCredentialsError(pub String);
+
+    impl fmt::Display for InitializingCredentialsError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error initializing credentials: {}", self.0)
         }
     }
 }
