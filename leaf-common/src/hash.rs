@@ -5,12 +5,8 @@ use streebog::digest::consts::U32;
 use streebog::digest::core_api::{CoreWrapper, CtVariableCoreWrapper};
 use streebog::{Digest, Oid256, StreebogVarCore};
 
-use errors::*;
-
-type Result<T> = std::result::Result<T, Box<dyn HashError>>;
-
 pub trait Hasher {
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>>;
+    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Vec<u8>;
 }
 
 pub struct StreebogHasher {
@@ -26,27 +22,29 @@ impl StreebogHasher {
 }
 
 impl Hasher for StreebogHasher {
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>> {
+    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Vec<u8> {
         self.hasher.borrow_mut().update(chunk);
         let result = self.hasher.borrow_mut().clone().finalize();
 
         let result = result.to_vec();
         self.hasher.borrow_mut().flush().unwrap();
 
-        Ok(result)
-    }
-}
-
-mod errors {
-    use std::fmt;
-    use std::fmt::Formatter;
-
-    pub trait HashError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
+    #[test]
+    fn test_streebog_calc_hash_for_chunk_successful_calculation() {
+        let hasher = StreebogHasher::new();
+        let message = b"Hello World";
+        let result = vec![102, 108, 244, 251, 247, 78, 198, 138, 102, 232, 221, 61, 48, 97, 176, 51, 117, 104, 206, 33, 161, 4, 84, 29, 77, 238, 3, 245, 68, 140, 41, 175];
+
+        let hash = hasher.calc_hash_for_chunk(message);
+
+        assert_eq!(hash, result);
+    }
 }
