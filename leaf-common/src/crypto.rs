@@ -186,6 +186,11 @@ mod init {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+
+    }
 }
 
 mod errors {

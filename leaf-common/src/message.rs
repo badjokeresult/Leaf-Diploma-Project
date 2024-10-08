@@ -5,16 +5,14 @@ use serde::{Deserialize, Serialize};
 use errors::*;
 use consts::*;
 
-type Result<T> = std::result::Result<T, Box<dyn MessageError>>;
-
 #[repr(u8)]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum MessageType {
-    SendingReq = SENDING_REQ_MSG_TYPE, // keeps hash
-    RetrievingReq = RETRIEVING_REQ_MSG_TYPE, // keeps hash
-    SendingAck = SENDING_ACK_MSG_TYPE, // keeps hash
-    RetrievingAck = RETRIEVING_ACK_MSG_TYPE, // keeps data and its hash
-    ContentFilled = CONTENT_FILLED_MSG_TYPE, // keeps data and its hash
+    SendingReq = SENDING_REQ_MSG_TYPE,
+    RetrievingReq = RETRIEVING_REQ_MSG_TYPE,
+    SendingAck = SENDING_ACK_MSG_TYPE,
+    RetrievingAck = RETRIEVING_ACK_MSG_TYPE,
+    ContentFilled = CONTENT_FILLED_MSG_TYPE,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -25,27 +23,27 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn new(msg_type_num: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Message> {
+    pub fn new(msg_type_num: u8, hash: &[u8], data: Option<Vec<u8>>) -> Message {
         let r#type = MessageType::from(msg_type_num);
 
-        Ok(Message {
+        Message {
             r#type,
             hash: hash.to_vec(),
             data,
-        })
+        }
     }
 
-    pub fn as_json(&self) -> Result<String> {
+    pub fn as_json(&self) -> Result<String, MessageSerializationError> {
         return match serde_json::to_string(&self) {
             Ok(j) => Ok(j.to_string()),
-            Err(_) => Err(Box::new(MessageSerializationError)),
+            Err(e) => Err(MessageSerializationError(e.to_string())),
         };
     }
 
-    pub fn from_json(message: &str) -> Result<Self> {
+    pub fn from_json(message: &str) -> Result<Self, MessageDeserializationError> {
         return match serde_json::from_str(message) {
             Ok(m) => Ok(m),
-            Err(_) => Err(Box::new(MessageDeserializationError)),
+            Err(e) => Err(MessageDeserializationError(e.to_string())),
         };
     }
 
@@ -109,34 +107,38 @@ pub mod consts {
 }
 
 pub mod builder {
-    use crate::codec::Codec;
+    use crate::Codec;
     use crate::DeflateCodec;
+
     use super::Message;
-
     use super::errors::*;
-    use super::Result;
 
-    pub fn build_encoded_message(codec: &DeflateCodec, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>> {
+    pub fn build_encoded_message(codec: &DeflateCodec, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>, MessageSerializationError> {
         match Message::new(msg_type, hash, data) {
             Ok(m) => match m.as_json() {
                 Ok(j) => match codec.encode_message(&j) {
                     Ok(b) => Ok(b),
-                    Err(_) => return Err(Box::new(MessageSerializationError)),
+                    Err(e) => return Err(Box::new(MessageSerializationError(e.to_string()))),
                 },
-                Err(e) => Err(e)
+                Err(e) => Err(MessageSerializationError(e.to_string()))
             },
             Err(e) => Err(e),
         }
     }
 
-    pub fn get_decode_message(codec: &DeflateCodec, buf: &[u8]) -> Result<Message> {
+    pub fn get_decode_message(codec: &DeflateCodec, buf: &[u8]) -> Result<Message, MessageDeserializationError> {
         match codec.decode_message(buf) {
             Ok(s) => match Message::from_json(&s) {
                 Ok(m) => Ok(m),
                 Err(e) => Err(e),
             },
-            Err(_) => Err(Box::new(MessageDeserializationError)),
+            Err(e) => Err(MessageDeserializationError(e.to_string())),
         }
+    }
+
+    #[cfg(test)]
+    mod tests {
+
     }
 }
 
@@ -144,52 +146,30 @@ mod errors {
     use std::fmt;
     use std::fmt::Formatter;
 
-    pub trait MessageError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
-    }
-
     #[derive(Debug, Clone)]
-    pub struct MessageSerializationError;
-
-    impl MessageError for MessageSerializationError {
-        fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-            write!(f, "Error serialization message into JSON")
-        }
-    }
+    pub struct MessageSerializationError(pub String);
 
     impl fmt::Display for MessageSerializationError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            MessageError::fmt(self, f)
+        fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+            write!(f, "Error serialization message into JSON: {}", self.0)
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct MessageDeserializationError;
-
-    impl MessageError for MessageDeserializationError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error deserializing message from JSON")
-        }
-    }
+    pub struct MessageDeserializationError(pub String);
 
     impl fmt::Display for MessageDeserializationError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            MessageError::fmt(self, f)
+            write!(f, "Error deserializing message from JSON: {}", self.0)
         }
     }
 
     #[derive(Debug, Clone)]
     pub struct InvalidMessageTypeError(pub u8);
 
-    impl MessageError for InvalidMessageTypeError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Invalid message type id: {}", self.0)
-        }
-    }
-
     impl fmt::Display for InvalidMessageTypeError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            MessageError::fmt(self, f)
+            write!(f, "Invalid message type id: {}", self.0)
         }
     }
 }

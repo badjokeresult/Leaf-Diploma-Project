@@ -6,14 +6,12 @@ use rayon::prelude::*;
 use errors::*;
 use consts::*;
 
-type Result<T> = std::result::Result<T, Box<dyn SecretSharingError>>;
-
 pub trait SecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>>;
-    fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Result<Vec<u8>>;
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>, DataSplittingError>;
+    fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError>;
 }
 
-pub mod consts {
+mod consts {
     pub const MIN_BLOCK_SIZE: usize = 64;
     pub const MAX_BLOCK_SIZE: usize = 2 * 1024 * 1024 * 1024;
     pub const GROWTH_FACTOR: f64 = 0.5;
@@ -24,7 +22,9 @@ pub struct ReedSolomonSecretSharer;
 
 impl ReedSolomonSecretSharer {
     pub fn new() -> ReedSolomonSecretSharer {
-        ReedSolomonSecretSharer {}
+        ReedSolomonSecretSharer {
+
+        }
     }
 
     fn calc_block_size(file_size: usize) -> usize {
@@ -40,7 +40,7 @@ impl ReedSolomonSecretSharer {
 }
 
 impl SecretSharer for ReedSolomonSecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>> {
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>, DataSplittingError> {
         let block_size = Self::calc_block_size(secret.len());
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size);
         let mut buf = vec![0u8; block_size * amount_of_blocks];
@@ -52,7 +52,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
             Ok(e) => e,
             Err(e) => {
                 eprintln!("ERROR INIT REED_SOLOMON");
-                return Err(Box::new(CreatingReedSolomonEncoderError(e.to_string())));
+                return Err(DataSplittingError(e.to_string()));
             },
         };
         let mut blocks = vec![];
@@ -82,7 +82,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
         Ok(blocks)
     }
 
-    fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Result<Vec<u8>> {
+    fn recover_from_chunks(&self, chunks: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError> {
         let mut blocks = chunks.par_iter().cloned().map(Some).collect::<Vec<_>>();
         let blocks_len = blocks.len();
         let mut full_data = vec![None; blocks_len];
@@ -107,67 +107,26 @@ mod errors {
     use std::fmt;
     use std::fmt::Formatter;
 
-    pub trait SecretSharingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
-    }
-
     #[derive(Debug, Clone)]
-    pub struct DataSplittingError;
-
-    impl SecretSharingError for DataSplittingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error attempting to split a data into chunks")
-        }
-    }
+    pub struct DataSplittingError(pub String);
 
     impl fmt::Display for DataSplittingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            SecretSharingError::fmt(self, f)
+            write!(f, "Error attempting to split a data into chunks: {}", self.0)
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct DataRecoveringError;
-
-    impl SecretSharingError for DataRecoveringError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error recovering data from chunks")
-        }
-    }
+    pub struct DataRecoveringError(pub String);
 
     impl fmt::Display for DataRecoveringError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            SecretSharingError::fmt(self, f)
+            write!(f, "Error recovering data from chunks: {}", self.0)
         }
     }
+}
 
-    #[derive(Debug, Clone)]
-    pub struct FileSizeIsNotMultipleToBlockSizeError(pub usize, pub usize);
+#[cfg(test)]
+mod tests {
 
-    impl SecretSharingError for FileSizeIsNotMultipleToBlockSizeError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "File size is not multiple by a block size: {} % {} != 0", self.0, self.1)
-        }
-    }
-
-    impl fmt::Display for FileSizeIsNotMultipleToBlockSizeError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            SecretSharingError::fmt(self, f)
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct CreatingReedSolomonEncoderError(pub String);
-
-    impl SecretSharingError for CreatingReedSolomonEncoderError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error creating Reed-Solomon encoder: {}", self.0)
-        }
-    }
-
-    impl fmt::Display for CreatingReedSolomonEncoderError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            SecretSharingError::fmt(self, f)
-        }
-    }
 }
