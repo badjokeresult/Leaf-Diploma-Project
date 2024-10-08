@@ -14,13 +14,10 @@ pub mod consts {
     pub const DEFAULT_STORAGE_PATH: &str = "server";
 }
 
-
-type Result<T> = std::result::Result<T, Box<dyn ServerStorageError>>;
-
 pub trait ServerStorage {
-    async fn add(&mut self, hash: &[u8], chunk: &[u8]) -> Result<()>;
-    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>>;
-    async fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>>;
+    async fn add(&mut self, hash: &[u8], chunk: &[u8]);
+    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveFromStorageError>;
+    async fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>, PoppingFromStorageError>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -29,15 +26,18 @@ pub struct BroadcastServerStorage {
 }
 
 impl BroadcastServerStorage {
-    pub async fn new() -> Result<BroadcastServerStorage> {
+    pub async fn new() -> Result<BroadcastServerStorage, ServerPeerInitializingError> {
         let default_working_file_path: PathBuf = dirs::home_dir().unwrap()
             .join(DEFAULT_WORKING_DIR)
             .join(DEFAULT_STORAGE_PATH)
             .join(DEFAULT_STORAGE_FILE_NAME);
-        Self::from_file(&default_working_file_path).await
+        match Self::from_file(&default_working_file_path).await {
+            Ok(s) => Ok(s),
+            Err(e) => Err(ServerPeerInitializingError(e.to_string())),
+        }
     }
 
-    async fn from_file(path: &PathBuf) -> Result<BroadcastServerStorage> {
+    async fn from_file(path: &PathBuf) -> Result<BroadcastServerStorage, FromFileInitializingError> {
         let content = match fs::read_to_string(path).await {
             Ok(c) => c,
             Err(_) => return Ok(BroadcastServerStorage {database: HashMap::new()}),
@@ -45,7 +45,7 @@ impl BroadcastServerStorage {
 
         let storage: Self = match serde_json::from_str(&content) {
             Ok(s) => s,
-            Err(e) => return Err(Box::new(FromJsonDeserializationError(e.to_string()))),
+            Err(e) => return Err(FromFileInitializingError(e.to_string())),
         };
 
         Ok(storage)
@@ -53,17 +53,22 @@ impl BroadcastServerStorage {
 }
 
 impl ServerStorage for BroadcastServerStorage {
-    async fn add(& mut self, hash: &[u8], chunk: &[u8]) -> Result<()> {
-        self.database.insert(hash.to_vec(), chunk.to_vec()).unwrap();
-        Ok(())
+    async fn add(&mut self, hash: &[u8], chunk: &[u8]) {
+        self.database.insert(hash.to_vec(), chunk.to_vec());
     }
 
-    async fn get(& self, hash: &[u8]) -> Result<Vec<u8>> {
-        Ok(self.database.get(hash).unwrap().clone())
+    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveFromStorageError> {
+        match self.database.get(hash) {
+            Some(d) => Ok(d.clone()),
+            None => Err(RetrieveFromStorageError(format!("{:?}", hash))),
+        }
     }
 
-    async fn pop(& mut self, hash: &[u8]) -> Result<Vec<u8>> {
-        Ok(self.database.remove(hash).unwrap())
+    async fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>, PoppingFromStorageError> {
+        match self.database.remove(hash) {
+            Some(d) => Ok(d),
+            None => Err(PoppingFromStorageError(format!("{:?}", hash)))
+        }
     }
 }
 
@@ -71,37 +76,39 @@ mod errors {
     use std::fmt;
     use std::fmt::Formatter;
 
-    pub trait ServerStorageError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result;
-    }
-
     #[derive(Debug, Clone)]
-    pub struct ServerDbFromFileInitError(pub String);
+    pub struct ServerPeerInitializingError(pub String);
 
-    impl ServerStorageError for ServerDbFromFileInitError {
+    impl fmt::Display for ServerPeerInitializingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error initialization server DB from file: {}", self.0)
-        }
-    }
-
-    impl fmt::Display for ServerDbFromFileInitError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            ServerStorageError::fmt(self, f)
+            write!(f, "Error initializing server peer: {}", self.0)
         }
     }
 
     #[derive(Debug, Clone)]
-    pub struct FromJsonDeserializationError(pub String);
+    pub struct FromFileInitializingError(pub String);
 
-    impl ServerStorageError for FromJsonDeserializationError {
+    impl fmt::Display for FromFileInitializingError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error deserialize from JSON into DB: {}", self.0)
+            write!(f, "Error initializing server peer from file: {}", self.0)
         }
     }
 
-    impl fmt::Display for FromJsonDeserializationError {
+    #[derive(Debug, Clone)]
+    pub struct RetrieveFromStorageError(pub String);
+
+    impl fmt::Display for RetrieveFromStorageError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            ServerStorageError::fmt(self, f)
+            write!(f, "Error retrieving from storage: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct PoppingFromStorageError(pub String);
+
+    impl fmt::Display for PoppingFromStorageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error popping data from storage: {}", self.0)
         }
     }
 }

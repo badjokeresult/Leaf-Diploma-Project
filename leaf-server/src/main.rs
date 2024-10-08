@@ -8,8 +8,8 @@ use peer::{BroadcastServerPeer, ServerPeer};
 async fn main() {
     let server = match BroadcastServerPeer::new().await {
         Ok(s) => s,
-        Err(_) => {
-            eprintln!("Error init server");
+        Err(e) => {
+            eprintln!("Error init server: {}", e.to_string());
             return;
         }
     };
