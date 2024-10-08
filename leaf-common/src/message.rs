@@ -108,7 +108,7 @@ pub mod consts {
     pub const CONTENT_FILLED_MSG_TYPE: u8 = 4;
 }
 
-pub mod message_builder {
+pub mod builder {
     use crate::codec::Codec;
     use crate::DeflateCodec;
     use super::Message;

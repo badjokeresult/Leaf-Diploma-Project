@@ -3,7 +3,7 @@ pub use hash::{StreebogHasher, Hasher};
 pub mod shared_secret;
 pub use shared_secret::{SecretSharer, ReedSolomonSecretSharer};
 pub mod message;
-pub use message::{MessageType, Message, message_builder};
+pub use message::{MessageType, Message, builder};
 pub mod crypto;
 pub use crypto::{KuznechikEncryptor, Encryptor};
 pub mod codec;
