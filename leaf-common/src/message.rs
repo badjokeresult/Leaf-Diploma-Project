@@ -6,7 +6,7 @@ use errors::*;
 use consts::*;
 
 #[repr(u8)]
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum MessageType {
     SendingReq = SENDING_REQ_MSG_TYPE,
     RetrievingReq = RETRIEVING_REQ_MSG_TYPE,
@@ -47,8 +47,8 @@ impl Message {
         };
     }
 
-    pub fn get_type(&self) -> u8 {
-        self.r#type.clone().into()
+    pub fn get_type(&self) -> MessageType {
+        self.r#type.clone()
     }
 
     pub fn get_hash(&self) -> Vec<u8> {
@@ -111,28 +111,48 @@ pub mod builder {
     use crate::DeflateCodec;
 
     use super::Message;
-    use super::errors::*;
+    use errors::*;
 
-    pub fn build_encoded_message(codec: &DeflateCodec, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>, MessageSerializationError> {
-        match Message::new(msg_type, hash, data) {
-            Ok(m) => match m.as_json() {
-                Ok(j) => match codec.encode_message(&j) {
-                    Ok(b) => Ok(b),
-                    Err(e) => return Err(Box::new(MessageSerializationError(e.to_string()))),
-                },
-                Err(e) => Err(MessageSerializationError(e.to_string()))
+    pub fn build_encoded_message(codec: &DeflateCodec, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>, BuildingMessageError> {
+        match Message::new(msg_type, hash, data).as_json() {
+            Ok(j) => match codec.encode_message(&j) {
+                Ok(b) => Ok(b),
+                Err(e) => return Err(BuildingMessageError(e.to_string())),
             },
-            Err(e) => Err(e),
+            Err(e) => Err(BuildingMessageError(e.to_string())),
         }
     }
 
-    pub fn get_decode_message(codec: &DeflateCodec, buf: &[u8]) -> Result<Message, MessageDeserializationError> {
+    pub fn get_decode_message(codec: &DeflateCodec, buf: &[u8]) -> Result<Message, ReconstructingMessageError> {
         match codec.decode_message(buf) {
             Ok(s) => match Message::from_json(&s) {
                 Ok(m) => Ok(m),
-                Err(e) => Err(e),
+                Err(e) => Err(ReconstructingMessageError(e.to_string())),
             },
-            Err(e) => Err(MessageDeserializationError(e.to_string())),
+            Err(e) => Err(ReconstructingMessageError(e.to_string())),
+        }
+    }
+
+    mod errors {
+        use std::fmt;
+        use std::fmt::{Formatter, Result};
+
+        #[derive(Debug, Clone)]
+        pub struct BuildingMessageError(pub String);
+
+        impl fmt::Display for BuildingMessageError {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                write!(f, "Error building message: {}", self.0)
+            }
+        }
+
+        #[derive(Debug, Clone)]
+        pub struct ReconstructingMessageError(pub String);
+
+        impl fmt::Display for ReconstructingMessageError {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                write!(f, "Error reconstructing message: {}", self.0)
+            }
         }
     }
 
