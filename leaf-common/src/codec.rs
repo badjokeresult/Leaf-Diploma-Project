@@ -72,5 +72,27 @@ mod errors {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
+    #[test]
+    fn test_deflate_encode_message_successful_encoding_returns_bytevec() {
+        let codec = DeflateCodec::new();
+        let message = "Hello World";
+        let result: Vec<u8> = vec![120, 156, 243, 72, 205, 201, 201, 87, 8, 207, 47, 202, 73, 1, 0, 24, 11, 4, 29];
+
+        let encoded = codec.encode_message(message).unwrap();
+
+        assert_eq!(result, encoded);
+    }
+
+    #[test]
+    fn test_deflate_decode_message_successful_decoding_returns_str() {
+        let codec = DeflateCodec::new();
+        let encoded = vec![120, 156, 243, 72, 205, 201, 201, 87, 8, 207, 47, 202, 73, 1, 0, 24, 11, 4, 29];
+        let result = "Hello World";
+
+        let decoded = codec.decode_message(&encoded).unwrap();
+
+        assert_eq!(result, &decoded);
+    }
 }
