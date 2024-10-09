@@ -1,6 +1,7 @@
 mod peer;
 
 use std::fmt::Display;
+
 use peer::{ClientPeer, BroadcastClientPeer};
 use leaf_common::{Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
 
