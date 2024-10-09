@@ -1,8 +1,8 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tokio::fs;
 use dirs;
 
 use consts::*;
@@ -15,9 +15,9 @@ pub mod consts {
 }
 
 pub trait ServerStorage {
-    async fn add(&mut self, hash: &[u8], chunk: &[u8]);
-    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveFromStorageError>;
-    async fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>, PoppingFromStorageError>;
+    fn add(&mut self, hash: &[u8], chunk: &[u8]);
+    fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveFromStorageError>;
+    fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>, PoppingFromStorageError>;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -26,19 +26,19 @@ pub struct BroadcastServerStorage {
 }
 
 impl BroadcastServerStorage {
-    pub async fn new() -> Result<BroadcastServerStorage, ServerPeerInitializingError> {
+    pub fn new() -> Result<BroadcastServerStorage, ServerPeerInitializingError> {
         let default_working_file_path: PathBuf = dirs::home_dir().unwrap()
             .join(DEFAULT_WORKING_DIR)
             .join(DEFAULT_STORAGE_PATH)
             .join(DEFAULT_STORAGE_FILE_NAME);
-        match Self::from_file(&default_working_file_path).await {
+        match Self::from_file(&default_working_file_path) {
             Ok(s) => Ok(s),
             Err(e) => Err(ServerPeerInitializingError(e.to_string())),
         }
     }
 
-    async fn from_file(path: &PathBuf) -> Result<BroadcastServerStorage, FromFileInitializingError> {
-        let content = match fs::read_to_string(path).await {
+    fn from_file(path: &PathBuf) -> Result<BroadcastServerStorage, FromFileInitializingError> {
+        let content = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => return Ok(BroadcastServerStorage {database: HashMap::new()}),
         };
@@ -53,18 +53,18 @@ impl BroadcastServerStorage {
 }
 
 impl ServerStorage for BroadcastServerStorage {
-    async fn add(&mut self, hash: &[u8], chunk: &[u8]) {
+    fn add(&mut self, hash: &[u8], chunk: &[u8]) {
         self.database.insert(hash.to_vec(), chunk.to_vec());
     }
 
-    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveFromStorageError> {
+    fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveFromStorageError> {
         match self.database.get(hash) {
             Some(d) => Ok(d.clone()),
             None => Err(RetrieveFromStorageError(format!("{:?}", hash))),
         }
     }
 
-    async fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>, PoppingFromStorageError> {
+    fn pop(&mut self, hash: &[u8]) -> Result<Vec<u8>, PoppingFromStorageError> {
         match self.database.remove(hash) {
             Some(d) => Ok(d),
             None => Err(PoppingFromStorageError(format!("{:?}", hash)))
