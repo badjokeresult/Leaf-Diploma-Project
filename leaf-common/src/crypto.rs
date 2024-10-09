@@ -6,8 +6,8 @@ use errors::*;
 use init::*;
 
 pub trait Encryptor {
-    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError>;
-    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError>;
+    fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError>;
+    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError>;
 }
 
 pub struct KuznechikEncryptor {

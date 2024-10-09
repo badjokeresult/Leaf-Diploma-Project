@@ -6,12 +6,12 @@ use peer::{BroadcastServerPeer, ServerPeer};
 
 #[tokio::main]
 async fn main() {
-    let server = match BroadcastServerPeer::new().await {
+    let server = match BroadcastServerPeer::new() {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error init server: {}", e.to_string());
             return;
         }
     };
-    server.listen().await;
+    server.listen();
 }
