@@ -67,6 +67,7 @@ impl ServerPeer for BroadcastServerPeer {
                     continue;
                 },
             };
+            println!("MESSAGE WAS RECEIVED FROM {}", addr);
             match builder::get_decode_message(&self.codec, &buf) {
                 Ok(m) => match m.get_type() {
                     MessageType::SendingReq => match self.handle_sending_req(&m, addr) {
@@ -97,6 +98,7 @@ impl ServerPeer for BroadcastServerPeer {
                 },
                 Err(e) => eprintln!("{}", e.to_string()),
             };
+            println!("MESSAGE WAS HANDLED!");
         }
     }
 }
