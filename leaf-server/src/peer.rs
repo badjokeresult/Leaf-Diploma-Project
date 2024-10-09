@@ -1,8 +1,6 @@
 use std::cell::RefCell;
 use std::net::{SocketAddr, UdpSocket};
 
-use local_ip_address::local_ip;
-
 use leaf_common::message::{builder, consts::*, Message};
 use leaf_common::{Codec, DeflateCodec, MessageType};
 
@@ -28,10 +26,7 @@ pub struct BroadcastServerPeer {
 
 impl BroadcastServerPeer {
     pub fn new() -> Result<BroadcastServerPeer, ServerPeerInitializationError> {
-        let addr = SocketAddr::new(match local_ip() {
-            Ok(i) => i,
-            Err(e) => return Err(ServerPeerInitializationError(e.to_string())),
-        }, DEFAULT_SERVER_PORT);
+        let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), DEFAULT_SERVER_PORT);
         let socket = match UdpSocket::bind(addr) {
             Ok(s) => s,
             Err(e) => return Err(ServerPeerInitializationError(e.to_string())),
