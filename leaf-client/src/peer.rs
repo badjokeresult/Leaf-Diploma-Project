@@ -125,7 +125,7 @@ impl ClientPeer for BroadcastClientPeer {
 
 mod consts {
     pub const DEFAULT_SERVER_PORT: u16 = 62092;
-    pub const MAX_DATAGRAM_SIZE: usize = 508;
+    pub const MAX_DATAGRAM_SIZE: usize = 65536;
 }
 
 mod errors {
