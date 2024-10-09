@@ -104,6 +104,7 @@ impl ServerPeer for BroadcastServerPeer {
 
 impl BroadcastServerPeer {
     async fn handle_sending_req(&self, message: &Message, addr: SocketAddr) -> Option<MessageHandlingError> {
+        eprintln!("SENDING_REQ RECEIVED!");
         let new_message = match builder::build_encoded_message(&self.codec, SENDING_ACK_MSG_TYPE, &message.get_hash(), Some(message.get_data().unwrap())) {
             Ok(m) => m,
             Err(e) => return Some(MessageHandlingError(message.get_type(), e.to_string()))
@@ -115,6 +116,7 @@ impl BroadcastServerPeer {
     }
 
     async fn handle_retrieving_req(&self, message: &Message, addr: SocketAddr) -> Option<MessageHandlingError> {
+        eprintln!("RERTRIEVING_REQ RECEIVED!");
         let content = match self.storage.borrow_mut().get(&message.get_hash()).await {
             Ok(c) => c,
             Err(e) => return Some(MessageHandlingError(message.get_type(), e.to_string())),
@@ -130,6 +132,7 @@ impl BroadcastServerPeer {
     }
 
     async fn handle_content_filled(&self, message: &Message) -> Option<MessageHandlingError> {
+        eprintln!("CONTENT_FILLED RECEIVED!");
         self.storage.borrow_mut().add(&message.get_hash(), &message.get_data().unwrap()).await;
         None
     }
