@@ -74,7 +74,7 @@ impl ClientPeer for BroadcastClientPeer {
                 Ok(m) => m,
                 Err(e) => return Err(SendingMessageError(e.to_string())),
             };
-            let msg_u8: u8 = message.get_type();
+            let msg_u8: u8 = message.get_type().into();
             if  msg_u8 == SENDING_ACK_MSG_TYPE && message.get_hash().eq(&hash) {
                 peer_addr = Some(addr);
                 break;
@@ -112,7 +112,8 @@ impl ClientPeer for BroadcastClientPeer {
                 Ok(m) => m,
                 Err(e) => return Err(ReceivingMessageError(e.to_string())),
             };
-            if message.get_type() == CONTENT_FILLED_MSG_TYPE && message.get_hash().eq(hash) {
+            let msg_type: u8 = message.get_type().into();
+            if msg_type == CONTENT_FILLED_MSG_TYPE && message.get_hash().eq(hash) {
                 data = Some(message.get_data().unwrap());
                 break;
             }
