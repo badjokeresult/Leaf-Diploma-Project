@@ -5,7 +5,7 @@ use std::fmt::Display;
 use peer::{ClientPeer, BroadcastClientPeer};
 use leaf_common::{Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
 
-pub async fn send_file(content: Vec<u8>) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
+pub fn send_file(content: Vec<u8>) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
     // 1. Split into chunks
     let sharer = ReedSolomonSecretSharer::new();
     let chunks = match sharer.split_into_chunks(&content) {
@@ -19,7 +19,7 @@ pub async fn send_file(content: Vec<u8>) -> Result<Vec<Vec<u8>>, Box<dyn std::er
         Err(e) => panic!("{}", e.to_string()),
     };
     for chunk in &chunks {
-        let encrypted_chunk = match encryptor.encrypt_chunk(chunk).await {
+        let encrypted_chunk = match encryptor.encrypt_chunk(chunk) {
             Ok(c) => c,
             Err(e) => panic!("{}", e.to_string()),
         };
@@ -27,12 +27,12 @@ pub async fn send_file(content: Vec<u8>) -> Result<Vec<Vec<u8>>, Box<dyn std::er
     }
     // 3. Send each encrypted chunk and save it as hash
     let mut hashes = vec![];
-    let client = match BroadcastClientPeer::new().await {
+    let client = match BroadcastClientPeer::new() {
         Ok(c) => c,
         Err(e) => panic!("{}", e.to_string()),
     };
     for chunk in &encrypted_chunks {
-        let hash = match client.send(chunk).await {
+        let hash = match client.send(chunk) {
             Ok(h) => h,
             Err(e) => panic!("{}", e.to_string()),
         };
@@ -42,15 +42,15 @@ pub async fn send_file(content: Vec<u8>) -> Result<Vec<Vec<u8>>, Box<dyn std::er
     Ok(hashes)
 }
 
-pub async fn recv_file(hashes: Vec<Vec<u8>>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+pub fn recv_file(hashes: Vec<Vec<u8>>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // 1. Receive chunks
-    let client = match BroadcastClientPeer::new().await {
+    let client = match BroadcastClientPeer::new() {
         Ok(c) => c,
         Err(e) => panic!("{}", e.to_string()),
     };
     let mut encrypted_chunks = vec![];
     for hash in &hashes {
-        let chunk = match client.recv(hash).await {
+        let chunk = match client.recv(hash) {
             Ok(c) => c,
             Err(e) => panic!("{}", e.to_string()),
         };
@@ -63,7 +63,7 @@ pub async fn recv_file(hashes: Vec<Vec<u8>>) -> Result<Vec<u8>, Box<dyn std::err
         Err(e) => panic!("{}", e.to_string()),
     };
     for chunk in &encrypted_chunks {
-        let decrypted_chunk = match decryptor.decrypt_chunk(chunk).await {
+        let decrypted_chunk = match decryptor.decrypt_chunk(chunk) {
             Ok(c) => c,
             Err(e) => panic!("{}", e.to_string()),
         };

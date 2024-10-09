@@ -1,18 +1,16 @@
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::str::FromStr;
 
-use tokio::net::UdpSocket;
 use leaf_common::{Codec, DeflateCodec};
 use leaf_common::{Hasher, StreebogHasher};
 use leaf_common::{builder, message::consts::*};
-use local_ip_address::{local_broadcast_ip, local_ip};
 
 use errors::*;
 use consts::*;
 
 pub trait ClientPeer {
-    async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, SendingMessageError>;
-    async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingMessageError>;
+    fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, SendingMessageError>;
+    fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingMessageError>;
 }
 
 pub struct BroadcastClientPeer {
@@ -22,12 +20,9 @@ pub struct BroadcastClientPeer {
 }
 
 impl BroadcastClientPeer {
-    pub async fn new() -> Result<BroadcastClientPeer, ClientPeerInitializationError> {
-        let addr = SocketAddr::new(match local_ip() {
-            Ok(i) => i,
-            Err(e) => return Err(ClientPeerInitializationError(e.to_string())),
-        }, 0);
-        let socket = match UdpSocket::bind(addr).await {
+    pub fn new() -> Result<BroadcastClientPeer, ClientPeerInitializationError> {
+        let addr = SocketAddr::new("192.168.124.1".parse().unwrap(), 0);
+        let socket = match UdpSocket::bind(addr) {
             Ok(s) => s,
             Err(e) => return Err(ClientPeerInitializationError(e.to_string())),
         };
@@ -48,17 +43,14 @@ impl BroadcastClientPeer {
 }
 
 impl ClientPeer for BroadcastClientPeer {
-    async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, SendingMessageError> {
+    fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, SendingMessageError> {
         let hash = self.hasher.calc_hash_for_chunk(chunk);
         let message = match builder::build_encoded_message(&self.codec, SENDING_REQ_MSG_TYPE, &hash, None) {
             Ok(m) => m,
             Err(e) => return Err(SendingMessageError(e.to_string())),
         };
-        let broadcast_addr = SocketAddr::new(match local_broadcast_ip() {
-            Ok(i) => i,
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        }, DEFAULT_SERVER_PORT);
-        match self.socket.send_to(&message, broadcast_addr).await {
+        let broadcast_addr = SocketAddr::new("192.168.124.255".parse().unwrap(), DEFAULT_SERVER_PORT);
+        match self.socket.send_to(&message, broadcast_addr) {
             Ok(_) => {},
             Err(e) => return Err(SendingMessageError(e.to_string())),
         };
@@ -66,7 +58,7 @@ impl ClientPeer for BroadcastClientPeer {
         let mut peer_addr = None;
         let mut sending_ack_buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
-            let (_, addr) = match self.socket.recv_from(&mut sending_ack_buf).await {
+            let (_, addr) = match self.socket.recv_from(&mut sending_ack_buf) {
                 Ok((s, a)) => (s, a),
                 Err(e) => return Err(SendingMessageError(e.to_string())),
             };
@@ -85,7 +77,7 @@ impl ClientPeer for BroadcastClientPeer {
             Ok(m) => m,
             Err(e) => return Err(SendingMessageError(e.to_string())),
         };
-        match self.socket.send_to(&message, peer_addr.unwrap()).await {
+        match self.socket.send_to(&message, peer_addr.unwrap()) {
             Ok(_) => {},
             Err(e) => return Err(SendingMessageError(e.to_string())),
         };
@@ -93,21 +85,18 @@ impl ClientPeer for BroadcastClientPeer {
         Ok(hash)
     }
 
-    async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingMessageError> {
+    fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingMessageError> {
         let message = match builder::build_encoded_message(&self.codec, RETRIEVING_REQ_MSG_TYPE, &hash, None) {
             Ok(m) => m,
             Err(e) => return Err(ReceivingMessageError(e.to_string())),
         };
-        let broadcast_addr = SocketAddr::new(match local_broadcast_ip() {
-            Ok(i) => i,
-            Err(e) => return Err(ReceivingMessageError(e.to_string())),
-        }, DEFAULT_SERVER_PORT);
-        self.socket.send_to(&message, broadcast_addr).await.unwrap();
+        let broadcast_addr = SocketAddr::new("192.168.124.255".parse().unwrap(), DEFAULT_SERVER_PORT);
+        self.socket.send_to(&message, broadcast_addr).unwrap();
 
         let mut retrieving_ack_buf = [0u8; MAX_DATAGRAM_SIZE];
         let mut data = None;
         loop {
-            let _ = self.socket.recv_from(&mut retrieving_ack_buf).await.unwrap();
+            let _ = self.socket.recv_from(&mut retrieving_ack_buf).unwrap();
             let message = match builder::get_decode_message(&self.codec, &retrieving_ack_buf) {
                 Ok(m) => m,
                 Err(e) => return Err(ReceivingMessageError(e.to_string())),

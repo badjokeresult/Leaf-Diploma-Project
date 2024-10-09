@@ -14,5 +14,5 @@ name = "leafclient"
 crate-type = ["rlib"]
 
 [[bin]]
-name = "leaf_client"
+name = "leaf-client"
 path = "src/main.rs"
