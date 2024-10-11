@@ -6,8 +6,8 @@ use errors::*;
 use init::*;
 
 pub trait Encryptor {
-    fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError>;
-    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError>;
+    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError>;
+    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError>;
 }
 
 pub struct KuznechikEncryptor {
@@ -32,12 +32,12 @@ impl KuznechikEncryptor {
         })
     }
 
-    fn load_passwd_gamma(&self) -> Result<(String, Vec<u8>), LoadingCredentialsError> {
-        let password = match self.password_file.load_passwd() {
+    async fn load_passwd_gamma(&self) -> Result<(String, Vec<u8>), LoadingCredentialsError> {
+        let password = match self.password_file.load_passwd().await {
             Ok(p) => p,
             Err(e) => return Err(LoadingCredentialsError(e.to_string())),
         };
-        let gamma = match self.gamma_file.load_gamma() {
+        let gamma = match self.gamma_file.load_gamma().await {
             Ok(g) => g,
             Err(e) => return Err(LoadingCredentialsError(e.to_string())),
         };
@@ -52,8 +52,8 @@ impl KuznechikEncryptor {
 }
 
 impl Encryptor for KuznechikEncryptor {
-    fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError> {
-        let (password, gamma) = match self.load_passwd_gamma() {
+    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError> {
+        let (password, gamma) = match self.load_passwd_gamma().await {
             Ok((p, g)) => (p, g),
             Err(e) => return Err(DataEncryptionError(e.to_string())),
         };
@@ -67,8 +67,8 @@ impl Encryptor for KuznechikEncryptor {
         Ok(encrypted_chunk)
     }
 
-    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError> {
-        let (password, gamma) = match self.load_passwd_gamma() {
+    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError> {
+        let (password, gamma) = match self.load_passwd_gamma().await {
             Ok((p, g)) => (p, g),
             Err(e) => return Err(DataDecryptionError(e.to_string())),
         };
@@ -85,8 +85,8 @@ impl Encryptor for KuznechikEncryptor {
 
 mod init {
     use std::path::PathBuf;
-    use std::fs;
 
+    use tokio::fs;
     use rand::{Rng, thread_rng};
 
     use super::errors::*;
@@ -112,14 +112,14 @@ mod init {
             })
         }
 
-        pub fn load_passwd(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
-            if let Err(_) = fs::read_to_string(&self.0) {
+        pub async fn load_passwd(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
+            if let Err(_) = fs::read_to_string(&self.0).await {
                 match self.init_password_at_first_launch(32) {
                     Ok(_) => {},
                     Err(e) => return Err(LoadingCredentialsError(e.to_string())),
                 };
             }
-            let binding = match fs::read(&self.0) {
+            let binding = match fs::read(&self.0).await {
                 Ok(s) => s,
                 Err(e) => return Err(LoadingCredentialsError(e.to_string())),
             };
@@ -128,7 +128,7 @@ mod init {
             Ok(content)
         }
 
-        fn init_password_at_first_launch(&self, len: usize) -> Result<(), InitializingCredentialsError> {
+        async fn init_password_at_first_launch(&self, len: usize) -> Result<(), InitializingCredentialsError> {
             let password: String = thread_rng()
                 .sample_iter::<u8, _>(rand::distributions::Alphanumeric)
                 .take(len)
@@ -137,7 +137,7 @@ mod init {
 
             let password_as_bytes = password.as_bytes();
 
-            match fs::write(&self.0, password_as_bytes) {
+            match fs::write(&self.0, password_as_bytes).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(InitializingCredentialsError(e.to_string())),
             }
@@ -158,15 +158,15 @@ mod init {
             })
         }
 
-        pub fn load_gamma(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
-            if let Err(_) = fs::read_to_string(&self.0) {
+        pub async fn load_gamma(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
+            if let Err(_) = fs::read_to_string(&self.0).await {
                 match self.init_gamma_at_first_launch(32) {
                     Ok(_) => {},
                     Err(e) => return Err(LoadingCredentialsError(e.to_string())),
                 };
             }
 
-            let gamma = match fs::read(&self.0) {
+            let gamma = match fs::read(&self.0).await {
                 Ok(s) => s,
                 Err(e) => return Err(LoadingCredentialsError(e.to_string())),
             };
@@ -174,13 +174,13 @@ mod init {
             Ok(gamma)
         }
 
-        fn init_gamma_at_first_launch(&self, len: usize) -> Result<(), InitializingCredentialsError> {
+        async fn init_gamma_at_first_launch(&self, len: usize) -> Result<(), InitializingCredentialsError> {
             let gamma: Vec<u8> = thread_rng()
                 .sample_iter::<u8, _>(rand::distributions::Standard)
                 .take(len)
                 .collect();
 
-            match fs::write(&self.0, &gamma) {
+            match fs::write(&self.0, &gamma).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(InitializingCredentialsError(e.to_string())),
             }
