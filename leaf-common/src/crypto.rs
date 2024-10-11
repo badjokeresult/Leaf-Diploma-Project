@@ -114,7 +114,7 @@ mod init {
 
         pub async fn load_passwd(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
             if let Err(_) = fs::read_to_string(&self.0).await {
-                match self.init_password_at_first_launch(32) {
+                match self.init_password_at_first_launch(32).await {
                     Ok(_) => {},
                     Err(e) => return Err(LoadingCredentialsError(e.to_string())),
                 };
@@ -160,7 +160,7 @@ mod init {
 
         pub async fn load_gamma(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
             if let Err(_) = fs::read_to_string(&self.0).await {
-                match self.init_gamma_at_first_launch(32) {
+                match self.init_gamma_at_first_launch(32).await {
                     Ok(_) => {},
                     Err(e) => return Err(LoadingCredentialsError(e.to_string())),
                 };

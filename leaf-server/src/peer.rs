@@ -1,5 +1,7 @@
 use std::cell::RefCell;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
+
+use tokio::net::UdpSocket;
 
 use leaf_common::message::{builder, consts::*, Message};
 use leaf_common::{Codec, DeflateCodec, MessageType};
@@ -15,7 +17,7 @@ pub mod consts {
 }
 
 pub trait ServerPeer {
-    fn listen(&self);
+    async fn listen(&self);
 }
 
 pub struct BroadcastServerPeer {
@@ -25,9 +27,9 @@ pub struct BroadcastServerPeer {
 }
 
 impl BroadcastServerPeer {
-    pub fn new() -> Result<BroadcastServerPeer, ServerPeerInitializationError> {
+    pub async fn new() -> Result<BroadcastServerPeer, ServerPeerInitializationError> {
         let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), DEFAULT_SERVER_PORT);
-        let socket = match UdpSocket::bind(addr) {
+        let socket = match UdpSocket::bind(addr).await {
             Ok(s) => s,
             Err(e) => return Err(ServerPeerInitializationError(e.to_string())),
         };
@@ -37,7 +39,7 @@ impl BroadcastServerPeer {
             Err(e) => return Err(ServerPeerInitializationError(e.to_string())),
         }
 
-        let storage = RefCell::new(match BroadcastServerStorage::new() {
+        let storage = RefCell::new(match BroadcastServerStorage::new().await {
             Ok(s) => s,
             Err(e) => return Err(ServerPeerInitializationError(e.to_string())),
         });
@@ -52,10 +54,10 @@ impl BroadcastServerPeer {
 }
 
 impl ServerPeer for BroadcastServerPeer {
-    fn listen(&self) {
+    async fn listen(&self) {
         let mut buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
-            let (_, addr) = match self.socket.recv_from(&mut buf) {
+            let (_, addr) = match self.socket.recv_from(&mut buf).await {
                 Ok((s, a)) => (s, a),
                 Err(_) => {
                     eprintln!("Error during receiving a datagram");
@@ -65,14 +67,14 @@ impl ServerPeer for BroadcastServerPeer {
             println!("MESSAGE WAS RECEIVED FROM {}", addr);
             match builder::get_decode_message(&self.codec, &buf) {
                 Ok(m) => match m.get_type() {
-                    MessageType::SendingReq => match self.handle_sending_req(&m, addr) {
+                    MessageType::SendingReq => match self.handle_sending_req(&m, addr).await {
                         Some(_) => {
                             eprintln!("Error handling SENDING_REQ message");
                             continue;
                         },
                         None => {},
                     },
-                    MessageType::RetrievingReq => match self.handle_retrieving_req(&m, addr) {
+                    MessageType::RetrievingReq => match self.handle_retrieving_req(&m, addr).await {
                         Some(_) => {
                             eprintln!("Error handling RETRIEVING_REQ message");
                             continue;
@@ -99,19 +101,21 @@ impl ServerPeer for BroadcastServerPeer {
 }
 
 impl BroadcastServerPeer {
-    fn handle_sending_req(&self, message: &Message, addr: SocketAddr) -> Option<MessageHandlingError> {
+    async fn handle_sending_req(&self, message: &Message, addr: SocketAddr) -> Option<MessageHandlingError> {
         eprintln!("SENDING_REQ RECEIVED!");
-        let new_message = match builder::build_encoded_message(&self.codec, SENDING_ACK_MSG_TYPE, &message.get_hash(), Some(message.get_data().unwrap())) {
+        let new_message = match builder::build_encoded_message(&self.codec, SENDING_ACK_MSG_TYPE, &message.get_hash(), None) {
             Ok(m) => m,
             Err(e) => return Some(MessageHandlingError(message.get_type(), e.to_string()))
         };
-        match self.socket.send_to(&new_message, addr) {
+        let result = match self.socket.send_to(&new_message, addr).await {
             Ok(_) => None,
             Err(e) => Some(MessageHandlingError(MessageType::SendingAck, e.to_string())),
-        }
+        };
+        eprintln!("SENDING_ACK WAS SENT TO {}", addr);
+        result
     }
 
-    fn handle_retrieving_req(&self, message: &Message, addr: SocketAddr) -> Option<MessageHandlingError> {
+    async fn handle_retrieving_req(&self, message: &Message, addr: SocketAddr) -> Option<MessageHandlingError> {
         eprintln!("RERTRIEVING_REQ RECEIVED!");
         let content = match self.storage.borrow_mut().get(&message.get_hash()) {
             Ok(c) => c,
@@ -121,7 +125,7 @@ impl BroadcastServerPeer {
             Ok(m) => m,
             Err(e) => return Some(MessageHandlingError(MessageType::RetrievingAck, e.to_string())),
         };
-        match self.socket.send_to(&msg, addr) {
+        match self.socket.send_to(&msg, addr).await {
             Ok(_) => None,
             Err(e) => Some(MessageHandlingError(MessageType::RetrievingAck, e.to_string())),
         }

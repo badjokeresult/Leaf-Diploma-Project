@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 
+use tokio::fs;
 use serde::{Deserialize, Serialize};
 use dirs;
 
@@ -26,19 +26,19 @@ pub struct BroadcastServerStorage {
 }
 
 impl BroadcastServerStorage {
-    pub fn new() -> Result<BroadcastServerStorage, ServerPeerInitializingError> {
+    pub async fn new() -> Result<BroadcastServerStorage, ServerPeerInitializingError> {
         let default_working_file_path: PathBuf = dirs::home_dir().unwrap()
             .join(DEFAULT_WORKING_DIR)
             .join(DEFAULT_STORAGE_PATH)
             .join(DEFAULT_STORAGE_FILE_NAME);
-        match Self::from_file(&default_working_file_path) {
+        match Self::from_file(&default_working_file_path).await {
             Ok(s) => Ok(s),
             Err(e) => Err(ServerPeerInitializingError(e.to_string())),
         }
     }
 
-    fn from_file(path: &PathBuf) -> Result<BroadcastServerStorage, FromFileInitializingError> {
-        let content = match fs::read_to_string(path) {
+    async fn from_file(path: &PathBuf) -> Result<BroadcastServerStorage, FromFileInitializingError> {
+        let content = match fs::read_to_string(path).await {
             Ok(c) => c,
             Err(_) => return Ok(BroadcastServerStorage {database: HashMap::new()}),
         };
