@@ -1,0 +1,16 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.40.0", features = ["full"] }
+common = { path = "../common" }
+
+[lib]
+name = "client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "test_client"
+path = "src/main.rs"

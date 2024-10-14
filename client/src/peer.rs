@@ -3,9 +3,9 @@ use std::str::FromStr;
 
 use tokio::net::UdpSocket;
 
-use leaf_common::{Codec, DeflateCodec};
-use leaf_common::{Hasher, StreebogHasher};
-use leaf_common::{builder, message::consts::*};
+use common::{Codec, DeflateCodec};
+use common::{Hasher, StreebogHasher};
+use common::{builder, message::consts::*};
 
 use errors::*;
 use consts::*;
@@ -23,7 +23,7 @@ pub struct BroadcastClientPeer {
 
 impl BroadcastClientPeer {
     pub async fn new() -> Result<BroadcastClientPeer, ClientPeerInitializationError> {
-        let addr = SocketAddr::new("192.168.124.1".parse().unwrap(), 0); // TODO
+        let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 0); // TODO
         let socket = match UdpSocket::bind(addr).await {
             Ok(s) => s,
             Err(e) => return Err(ClientPeerInitializationError(e.to_string())),
@@ -62,22 +62,20 @@ impl ClientPeer for BroadcastClientPeer {
 
         let mut peer_addr = None;
         let mut sending_ack_buf = [0u8; MAX_DATAGRAM_SIZE];
-        loop {
-            let (_, addr) = match self.socket.recv_from(&mut sending_ack_buf).await {
-                Ok((s, a)) => (s, a),
-                Err(e) => return Err(SendingMessageError(e.to_string())),
-            };
-            println!("\tSENDING_ACK WAS RECEIVED");
-            let message = match builder::get_decode_message(&self.codec, &sending_ack_buf) {
-                Ok(m) => m,
-                Err(e) => return Err(SendingMessageError(e.to_string())),
-            };
-            println!("\tMESSAGE WAS DECODED");
-            let msg_u8: u8 = message.get_type().into();
-            if  msg_u8 == SENDING_ACK_MSG_TYPE && message.get_hash().eq(&hash) {
-                peer_addr = Some(addr);
-                break;
-            }
+
+        let (_, addr) = match self.socket.recv_from(&mut sending_ack_buf).await {
+            Ok((s, a)) => (s, a),
+            Err(e) => return Err(SendingMessageError(e.to_string())),
+        };
+        println!("\tSENDING_ACK WAS RECEIVED");
+        let message = match builder::get_decode_message(&self.codec, &sending_ack_buf) {
+            Ok(m) => m,
+            Err(e) => return Err(SendingMessageError(e.to_string())),
+        };
+        println!("\tMESSAGE WAS DECODED");
+        let msg_u8: u8 = message.get_type().into();
+        if  msg_u8 == SENDING_ACK_MSG_TYPE && message.get_hash().eq(&hash) {
+            peer_addr = Some(addr)
         };
 
         let message = match builder::build_encoded_message(&self.codec, CONTENT_FILLED_MSG_TYPE, &hash, Some(chunk.to_vec())) {

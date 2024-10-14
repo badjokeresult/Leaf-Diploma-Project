@@ -1,0 +1,23 @@
+[package]
+name = "leaf"
+version = "0.1.0"
+edition = "2021"
+
+resolver = "2"
+
+[workspace]
+members = [
+    "common",
+    "server",
+    "client",
+]
+
+[dependencies]
+tokio = { version = "1.40.0", features = ["full"] }
+common = { path = "common" }
+server = { path = "server" }
+client = { path = "client" }
+
+[[bin]]
+name = "leaf"
+path = "src/main.rs"

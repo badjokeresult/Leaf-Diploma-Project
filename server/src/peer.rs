@@ -3,10 +3,10 @@ use std::net::SocketAddr;
 
 use tokio::net::UdpSocket;
 
-use leaf_common::message::{builder, consts::*, Message};
-use leaf_common::{Codec, DeflateCodec, MessageType};
+use common::message::{builder, consts::*, Message};
+use common::{DeflateCodec, MessageType};
 
-use crate::storage::{BroadcastServerStorage, ServerStorage};
+use crate::storage::{BroadcastServerStorage, ServerStorage, consts::*};
 
 use consts::*;
 use errors::*;
@@ -141,7 +141,7 @@ impl BroadcastServerPeer {
 mod errors {
     use std::fmt;
     use std::fmt::Formatter;
-    use leaf_common::MessageType;
+    use common::MessageType;
 
     #[derive(Debug, Clone)]
     pub struct ServerPeerInitializationError(pub String);

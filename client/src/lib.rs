@@ -3,7 +3,7 @@ mod peer;
 use std::fmt::Display;
 
 use peer::{ClientPeer, BroadcastClientPeer};
-use leaf_common::{Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
+use common::{Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
 
 pub async fn send_file(content: Vec<u8>) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
     // 1. Split into chunks
