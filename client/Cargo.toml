@@ -10,7 +10,4 @@ common = { path = "../common" }
 [lib]
 name = "client"
 path = "src/lib.rs"
-
-[[bin]]
-name = "test_client"
-path = "src/main.rs"
+crate-type = ["rlib"]

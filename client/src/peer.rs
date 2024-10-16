@@ -1,162 +1,102 @@
-use std::net::SocketAddr;
-use std::str::FromStr;
-
 use tokio::net::UdpSocket;
-
-use common::{Codec, DeflateCodec};
-use common::{Hasher, StreebogHasher};
-use common::{builder, message::consts::*};
-
-use errors::*;
-use consts::*;
+use std::io::Error;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::str::FromStr;
+use std::time::{Duration, Instant};
+use common::{Hasher, MessageBuilder, MessageType, StreebogHasher};
 
 pub trait ClientPeer {
-    async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, SendingMessageError>;
-    async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingMessageError>;
+    async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, Error>;
+    async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, Error>;
 }
 
 pub struct BroadcastClientPeer {
     socket: UdpSocket,
     hasher: StreebogHasher,
-    codec: DeflateCodec,
+    message_builder: MessageBuilder
 }
 
 impl BroadcastClientPeer {
-    pub async fn new() -> Result<BroadcastClientPeer, ClientPeerInitializationError> {
-        let addr = SocketAddr::new("0.0.0.0".parse().unwrap(), 0); // TODO
-        let socket = match UdpSocket::bind(addr).await {
-            Ok(s) => s,
-            Err(e) => return Err(ClientPeerInitializationError(e.to_string())),
-        };
-        match socket.set_broadcast(true) {
-            Ok(_) => {},
-            Err(e) => return Err(ClientPeerInitializationError(e.to_string())),
-        };
-
+    pub async fn new() -> BroadcastClientPeer {
+        let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+        socket.set_broadcast(true).unwrap();
         let hasher = StreebogHasher::new();
-        let codec = DeflateCodec::new();
+        let message_builder = MessageBuilder::new();
 
-        Ok(BroadcastClientPeer {
+        BroadcastClientPeer {
             socket,
             hasher,
-            codec,
-        })
+            message_builder,
+        }
     }
 }
 
 impl ClientPeer for BroadcastClientPeer {
-    async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, SendingMessageError> {
+    async fn send(&self, chunk: &[u8]) -> Result<Vec<u8>, Error> {
         let hash = self.hasher.calc_hash_for_chunk(chunk);
-        println!("\tHASH WAS CALCULATED");
-        let message = match builder::build_encoded_message(&self.codec, SENDING_REQ_MSG_TYPE, &hash, None) {
-            Ok(m) => m,
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        };
-        println!("\tSENDING_REQ WAS BUILT");
-        let broadcast_addr = SocketAddr::new("192.168.124.255".parse().unwrap(), DEFAULT_SERVER_PORT);
-        match self.socket.send_to(&message, broadcast_addr).await {
-            Ok(_) => {},
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        };
-        println!("\tSENDIND_REQ WAS SENT TO 192.168.124.255");
-
-        let mut peer_addr = None;
-        let mut sending_ack_buf = [0u8; MAX_DATAGRAM_SIZE];
-
-        let (_, addr) = match self.socket.recv_from(&mut sending_ack_buf).await {
-            Ok((s, a)) => (s, a),
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        };
-        println!("\tSENDING_ACK WAS RECEIVED");
-        let message = match builder::get_decode_message(&self.codec, &sending_ack_buf) {
-            Ok(m) => m,
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        };
-        println!("\tMESSAGE WAS DECODED");
-        let msg_u8: u8 = message.get_type().into();
-        if  msg_u8 == SENDING_ACK_MSG_TYPE && message.get_hash().eq(&hash) {
-            peer_addr = Some(addr)
-        };
-
-        let message = match builder::build_encoded_message(&self.codec, CONTENT_FILLED_MSG_TYPE, &hash, Some(chunk.to_vec())) {
-            Ok(m) => m,
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        };
-        println!("CONTENT_FILLED WAS BUILD");
-        match self.socket.send_to(&message, peer_addr.unwrap()).await {
-            Ok(_) => {},
-            Err(e) => return Err(SendingMessageError(e.to_string())),
-        };
-        println!("CONTENT_FILLED WAS SENT TO {}", peer_addr.unwrap());
-
+        self.send_req(&hash, MessageType::SendingReq).await.unwrap();
+        let addr = self.recv_ack(&hash, MessageType::SendingAck).await.unwrap();
+        self.send_content(&hash, chunk, addr).await.unwrap();
         Ok(hash)
     }
 
-    async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingMessageError> {
-        let message = match builder::build_encoded_message(&self.codec, RETRIEVING_REQ_MSG_TYPE, &hash, None) {
-            Ok(m) => m,
-            Err(e) => return Err(ReceivingMessageError(e.to_string())),
-        };
-        let broadcast_addr = SocketAddr::new("192.168.124.255".parse().unwrap(), DEFAULT_SERVER_PORT);
-        self.socket.send_to(&message, broadcast_addr).await.unwrap();
+    async fn recv(&self, hash: &[u8]) -> Result<Vec<u8>, Error> {
+        self.send_req(hash, MessageType::RetrievingReq).await.unwrap();
+        let addr = self.recv_ack(hash, MessageType::RetrievingAck).await.unwrap();
+        let data = self.recv_content(hash, addr).await.unwrap();
+        Ok(data)
+    }
+}
 
-        let mut retrieving_ack_buf = [0u8; MAX_DATAGRAM_SIZE];
-        let mut data = None;
+impl BroadcastClientPeer {
+    async fn send_req(&self, hash: &[u8], req_type: MessageType) -> Result<(), Error> {
+        let message = self.message_builder.build_encoded_message(
+            req_type.into(),
+            hash,
+            None,
+        ).unwrap();
+        let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str("192.168.124.255").unwrap()), 62092);
+        self.socket.send_to(&message, broadcast_addr).await.unwrap();
+        Ok(())
+    }
+
+    async fn recv_ack(&self, hash: &[u8], ack_type: MessageType) -> Result<SocketAddr, Error> {
+        let start = Instant::now();
         loop {
-            let _ = self.socket.recv_from(&mut retrieving_ack_buf).await.unwrap();
-            let message = match builder::get_decode_message(&self.codec, &retrieving_ack_buf) {
-                Ok(m) => m,
-                Err(e) => return Err(ReceivingMessageError(e.to_string())),
-            };
-            let msg_type: u8 = message.get_type().into();
-            if msg_type == CONTENT_FILLED_MSG_TYPE && message.get_hash().eq(hash) {
-                data = Some(message.get_data().unwrap());
-                break;
+            let mut buf = [0u8; 65536];
+            let (sz, addr) = self.socket.recv_from(&mut buf).await.unwrap();
+            let message = self.message_builder.deconstruct_encoded_message(&buf[..sz]).unwrap();
+            if message.get_type() == ack_type && message.get_hash().eq(hash) {
+                return Ok(addr);
+            }
+            if start.elapsed().eq(&Duration::from_secs(3)) {
+                return Err(Error::last_os_error());
             }
         }
-
-        Ok(data.unwrap())
     }
-}
 
-mod consts {
-    pub const DEFAULT_SERVER_PORT: u16 = 62092;
-    pub const MAX_DATAGRAM_SIZE: usize = 65536;
-}
+    async fn send_content(&self, hash: &[u8], chunk: &[u8], addr: SocketAddr) -> Result<(), Error> {
+        let message = self.message_builder.build_encoded_message(
+            MessageType::ContentFilled.into(),
+            hash,
+            Some(chunk.to_vec()),
+        ).unwrap();
+        self.socket.send_to(&message, addr).await.unwrap();
+        Ok(())
+    }
 
-mod errors {
-    use std::fmt;
-    use std::fmt::Formatter;
-
-    #[derive(Debug, Clone)]
-    pub struct SendingMessageError(pub String);
-
-    impl fmt::Display for SendingMessageError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error sending message: {}", self.0)
+    async fn recv_content(&self, hash: &[u8], addr: SocketAddr) -> Result<Vec<u8>, Error> {
+        let start = Instant::now();
+        loop {
+            let mut buf = [0u8; 65536];
+            let (sz, new_addr) = self.socket.recv_from(&mut buf).await.unwrap();
+            let message = self.message_builder.deconstruct_encoded_message(&buf[..sz]).unwrap();
+            if new_addr.eq(&addr) && message.get_type() == MessageType::ContentFilled && message.get_hash().iter().eq(hash) {
+                return Ok(message.get_data().unwrap());
+            }
+            if start.elapsed().eq(&Duration::from_secs(3)) {
+                return Err(Error::last_os_error());
+            }
         }
     }
-
-    #[derive(Debug, Clone)]
-    pub struct ReceivingMessageError(pub String);
-
-    impl fmt::Display for ReceivingMessageError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error receiving message: {}", self.0)
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct ClientPeerInitializationError(pub String);
-
-    impl fmt::Display for ClientPeerInitializationError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error initialization client peer: {}", self.0)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
 }

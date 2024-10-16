@@ -3,16 +3,16 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 
 use errors::*;
-use consts::*;
+use crate::{Codec, DeflateCodec};
 
 #[repr(u8)]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum MessageType {
-    SendingReq = SENDING_REQ_MSG_TYPE,
-    RetrievingReq = RETRIEVING_REQ_MSG_TYPE,
-    SendingAck = SENDING_ACK_MSG_TYPE,
-    RetrievingAck = RETRIEVING_ACK_MSG_TYPE,
-    ContentFilled = CONTENT_FILLED_MSG_TYPE,
+    SendingReq = 0,
+    RetrievingReq = 1,
+    SendingAck = 2,
+    RetrievingAck = 3,
+    ContentFilled = 4,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -64,11 +64,11 @@ impl Message {
 impl Into<u8> for MessageType {
     fn into(self) -> u8 {
         match self {
-            MessageType::SendingAck => SENDING_ACK_MSG_TYPE,
-            MessageType::ContentFilled => CONTENT_FILLED_MSG_TYPE,
-            MessageType::RetrievingAck => RETRIEVING_ACK_MSG_TYPE,
-            MessageType::RetrievingReq => RETRIEVING_REQ_MSG_TYPE,
-            MessageType::SendingReq => SENDING_REQ_MSG_TYPE,
+            MessageType::SendingAck => 2,
+            MessageType::ContentFilled => 4,
+            MessageType::RetrievingAck => 3,
+            MessageType::RetrievingReq => 1,
+            MessageType::SendingReq => 0,
         }
     }
 }
@@ -76,11 +76,11 @@ impl Into<u8> for MessageType {
 impl From<u8> for MessageType {
     fn from(value: u8) -> Self {
         match value {
-            SENDING_REQ_MSG_TYPE => MessageType::SendingReq,
-            CONTENT_FILLED_MSG_TYPE => MessageType::ContentFilled,
-            SENDING_ACK_MSG_TYPE => MessageType::SendingAck,
-            RETRIEVING_REQ_MSG_TYPE => MessageType::RetrievingReq,
-            RETRIEVING_ACK_MSG_TYPE => MessageType::RetrievingAck,
+            0 => MessageType::SendingReq,
+            4 => MessageType::ContentFilled,
+            2 => MessageType::SendingAck,
+            1 => MessageType::RetrievingReq,
+            3 => MessageType::RetrievingAck,
             _ => panic!(),
         }
     }
@@ -98,24 +98,20 @@ impl Display for Message {
     }
 }
 
-pub mod consts {
-    pub const SENDING_REQ_MSG_TYPE: u8 = 0;
-    pub const RETRIEVING_REQ_MSG_TYPE: u8 = 1;
-    pub const SENDING_ACK_MSG_TYPE: u8 = 2;
-    pub const RETRIEVING_ACK_MSG_TYPE: u8 = 3;
-    pub const CONTENT_FILLED_MSG_TYPE: u8 = 4;
+pub struct MessageBuilder {
+    codec: DeflateCodec,
 }
 
-pub mod builder {
-    use crate::Codec;
-    use crate::DeflateCodec;
+impl MessageBuilder {
+    pub fn new() -> MessageBuilder {
+        MessageBuilder {
+            codec: DeflateCodec::new(),
+        }
+    }
 
-    use super::Message;
-    use errors::*;
-
-    pub fn build_encoded_message(codec: &DeflateCodec, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>, BuildingMessageError> {
+    pub fn build_encoded_message(&self, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>, BuildingMessageError> {
         match Message::new(msg_type, hash, data).as_json() {
-            Ok(j) => match codec.encode_message(&j) {
+            Ok(j) => match self.codec.encode_message(&j) {
                 Ok(b) => Ok(b),
                 Err(e) => return Err(BuildingMessageError(e.to_string())),
             },
@@ -123,42 +119,14 @@ pub mod builder {
         }
     }
 
-    pub fn get_decode_message(codec: &DeflateCodec, buf: &[u8]) -> Result<Message, ReconstructingMessageError> {
-        match codec.decode_message(buf) {
+    pub fn deconstruct_encoded_message(&self, buf: &[u8]) -> Result<Message, ReconstructingMessageError> {
+        match self.codec.decode_message(buf) {
             Ok(s) => match Message::from_json(&s) {
                 Ok(m) => Ok(m),
                 Err(e) => Err(ReconstructingMessageError(e.to_string())),
             },
             Err(e) => Err(ReconstructingMessageError(e.to_string())),
         }
-    }
-
-    mod errors {
-        use std::fmt;
-        use std::fmt::{Formatter, Result};
-
-        #[derive(Debug, Clone)]
-        pub struct BuildingMessageError(pub String);
-
-        impl fmt::Display for BuildingMessageError {
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-                write!(f, "Error building message: {}", self.0)
-            }
-        }
-
-        #[derive(Debug, Clone)]
-        pub struct ReconstructingMessageError(pub String);
-
-        impl fmt::Display for ReconstructingMessageError {
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-                write!(f, "Error reconstructing message: {}", self.0)
-            }
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-
     }
 }
 
@@ -190,6 +158,24 @@ mod errors {
     impl fmt::Display for InvalidMessageTypeError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "Invalid message type id: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct BuildingMessageError(pub String);
+
+    impl fmt::Display for BuildingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error building message: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ReconstructingMessageError(pub String);
+
+    impl fmt::Display for ReconstructingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error reconstructing message: {}", self.0)
         }
     }
 }
