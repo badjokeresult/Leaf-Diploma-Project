@@ -1,24 +1,36 @@
-use std::sync::Arc;
-use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
-use tokio::task;
-use client;
-use server;
-use server::{BroadcastServerPeer, ServerPeer};
+use std::path::PathBuf;
+
+use clap::Parser;
+
+use sentfile::SentFile;
+use args::{Args, Command};
+
+use client::{recv_content, send_content};
+
+mod args;
+mod sentfile;
 
 #[tokio::main]
 async fn main() {
-    let handle = task::spawn(async move {
-        let server = BroadcastServerPeer::new().await;
-        server.listen().await;
-        println!("SERVER STARTED");
-        return;
-    });
-    println!("SERVER STARTED");
+    let args = Args::parse();
 
-    let content = tokio::fs::read("test.txt").await.unwrap();
-    let hashes = client::send_content(content).await;
-    let recv_content = client::recv_content(hashes).await;
-    tokio::fs::write("recv_test.txt", &recv_content).await.unwrap();
-    handle.await.unwrap();
+    let content = tokio::fs::read(&args.path).await.unwrap();
+
+    match args.command {
+        Command::Send => handle_send_request(content, &args.path).await,
+        Command::Recv => handle_recv_request(content, &args.path).await,
+    };
+}
+
+async fn handle_send_request(content: Vec<u8>, filepath: &PathBuf) {
+    let content_len = content.len();
+    let hashes = send_content(content).await;
+    let sent_file = SentFile::new(hashes, content_len);
+    sent_file.save_metadata(filepath).await;
+}
+
+async fn handle_recv_request(content: Vec<u8>, filepath: &PathBuf) {
+    let sent_file = SentFile::from_metadata(&content);
+    let file_content = recv_content(sent_file.hashes).await;
+    tokio::fs::write(filepath, &file_content).await.unwrap();
 }

@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
 use std::net::SocketAddr;
-use atomic_refcell::AtomicRefCell;
+use std::path::PathBuf;
 use tokio::net::UdpSocket;
+
 use common::{MessageBuilder, MessageType};
+use crate::storage::BroadcastServerStorage;
 
 pub trait ServerPeer {
     async fn listen(&self);
@@ -10,15 +12,15 @@ pub trait ServerPeer {
 
 pub struct BroadcastServerPeer {
     socket: UdpSocket,
-    storage: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    storage: RefCell<BroadcastServerStorage>,
     message_builder: MessageBuilder,
 }
 
 impl BroadcastServerPeer {
-    pub async fn new() -> BroadcastServerPeer {
+    pub async fn new(filepath: PathBuf) -> BroadcastServerPeer {
         let socket = UdpSocket::bind("0.0.0.0:62092").await.unwrap();
         socket.set_broadcast(true).unwrap();
-        let storage = AtomicRefCell::new(HashMap::new());
+        let storage = RefCell::new(BroadcastServerStorage::new(filepath).await);
         let message_builder = MessageBuilder::new();
 
         BroadcastServerPeer {
@@ -56,7 +58,7 @@ impl BroadcastServerPeer {
     }
 
     async fn handle_retrieving_req(&self, hash: &[u8], addr: SocketAddr) {
-        let data = match self.storage.borrow().get(hash) {
+        let data = match self.storage.borrow().database.get(hash) {
             Some(d) => d.to_vec(),
             None => return,
         };
@@ -69,6 +71,6 @@ impl BroadcastServerPeer {
     }
 
     async fn handle_content(&self, hash: &[u8], data: &[u8]) {
-        self.storage.borrow_mut().insert(hash.to_vec(), data.to_vec());
+        self.storage.borrow_mut().database.insert(hash.to_vec(), data.to_vec());
     }
 }

@@ -13,10 +13,12 @@ members = [
 ]
 
 [dependencies]
-tokio = { version = "1.40.0", features = ["full"] }
 client = { path = "client" }
-server = { path = "server" }
+tokio = { version = "1.40.0", features = ["full"] }
+clap = { version = "4.5.20", features = ["derive"] }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.132"
 
 [[bin]]
-name = "leaf"
+name = "client-cli"
 path = "src/main.rs"
