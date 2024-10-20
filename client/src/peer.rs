@@ -13,7 +13,7 @@ pub trait ClientPeer {
 pub struct BroadcastClientPeer {
     socket: UdpSocket,
     hasher: StreebogHasher,
-    message_builder: MessageBuilder
+    message_builder: MessageBuilder,
 }
 
 impl BroadcastClientPeer {

@@ -193,7 +193,7 @@ mod init {
     }
 }
 
-mod errors {
+pub mod errors {
     use std::fmt;
     use std::fmt::Formatter;
 

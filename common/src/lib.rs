@@ -8,7 +8,7 @@ pub mod message;
 pub use message::{MessageType, Message, MessageBuilder};
 
 pub mod crypto;
-pub use crypto::{KuznechikEncryptor, Encryptor};
+pub use crypto::{KuznechikEncryptor, Encryptor, errors as crypt_errors};
 
 pub mod codec;
 pub use codec::{Codec, DeflateCodec};

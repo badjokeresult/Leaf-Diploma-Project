@@ -7,4 +7,10 @@ edition = "2021"
 tokio = { version = "1.40.0", features = ["full"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
+atomic_refcell = "0.1.13"
 common = { path = "../common" }
+
+[lib]
+name = "server"
+path = "src/peer.rs"
+crate-type = ["rlib"]

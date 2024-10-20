@@ -1,6 +1,6 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use atomic_refcell::AtomicRefCell;
 use tokio::net::UdpSocket;
 use common::{MessageBuilder, MessageType};
 
@@ -10,7 +10,7 @@ pub trait ServerPeer {
 
 pub struct BroadcastServerPeer {
     socket: UdpSocket,
-    storage: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    storage: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
     message_builder: MessageBuilder,
 }
 
@@ -18,7 +18,7 @@ impl BroadcastServerPeer {
     pub async fn new() -> BroadcastServerPeer {
         let socket = UdpSocket::bind("0.0.0.0:62092").await.unwrap();
         socket.set_broadcast(true).unwrap();
-        let storage = RefCell::new(HashMap::new());
+        let storage = AtomicRefCell::new(HashMap::new());
         let message_builder = MessageBuilder::new();
 
         BroadcastServerPeer {

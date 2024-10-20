@@ -14,13 +14,9 @@ members = [
 
 [dependencies]
 tokio = { version = "1.40.0", features = ["full"] }
-common = { path = "common" }
-
-[lib]
-name = "client"
-path = "client/src/lib.rs"
-crate-type = ["rlib"]
+client = { path = "client" }
+server = { path = "server" }
 
 [[bin]]
-name = "server"
-path = "server/src/main.rs"
+name = "leaf"
+path = "src/main.rs"
