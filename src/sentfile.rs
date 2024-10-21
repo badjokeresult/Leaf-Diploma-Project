@@ -17,7 +17,7 @@ impl SentFile {
 
     pub async fn save_metadata(self, filename: &PathBuf) {
         let json = serde_json::to_vec(&self).unwrap();
-        tokio::fs::write(filename, &json).unwrap();
+        tokio::fs::write(filename, &json).await.unwrap();
     }
 
     pub fn from_metadata(content: &[u8]) -> SentFile {

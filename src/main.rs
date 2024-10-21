@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use sentfile::SentFile;
-use args::{Args, Command};
+use args::Args;
 
 use client::{recv_content, send_content};
 
@@ -16,9 +16,10 @@ async fn main() {
 
     let content = tokio::fs::read(&args.path).await.unwrap();
 
-    match args.command {
-        Command::Send => handle_send_request(content, &args.path).await,
-        Command::Recv => handle_recv_request(content, &args.path).await,
+    match args.command.as_str() {
+        "send" => handle_send_request(content, &args.path).await,
+        "recv" => handle_recv_request(content, &args.path).await,
+        _ => panic!("Unknown command: not `send` and not `recv`"),
     };
 }
 

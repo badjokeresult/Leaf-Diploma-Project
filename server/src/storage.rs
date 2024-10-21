@@ -17,6 +17,6 @@ impl BroadcastServerStorage {
     }
 
     pub async fn save_metadata(self, filepath: PathBuf) {
-        
+
     }
 }
