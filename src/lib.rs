@@ -1,6 +1,7 @@
 pub mod peer;
 pub mod client;
 pub mod server;
+mod codec;
 
 use std::net::SocketAddr;
 use std::sync::mpsc;

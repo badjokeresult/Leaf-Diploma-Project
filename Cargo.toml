@@ -3,15 +3,4 @@ name = "leaf"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
-resolver = "2"
-members = [
-    "tools",
-    "peer",
-    "client-cli",
-]
-
-[lib]
-name = "leaf_tools"
-path = "tools"
-crate-type = ["rlib"]
+[dependencies]
