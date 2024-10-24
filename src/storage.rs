@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use tokio::fs;
+use std::fs;
 
 #[derive(Serialize, Deserialize)]
 pub struct BroadcastServerStorage {
@@ -9,8 +9,8 @@ pub struct BroadcastServerStorage {
 }
 
 impl BroadcastServerStorage {
-    pub async fn new(filepath: PathBuf) -> BroadcastServerStorage {
-        match fs::read(filepath).await {
+    pub fn new(filepath: PathBuf) -> BroadcastServerStorage {
+        match fs::read(filepath) {
             Ok(c) => serde_json::from_slice(&c).unwrap(),
             Err(_) => BroadcastServerStorage { database: HashMap::new() }
         }

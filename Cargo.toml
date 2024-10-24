@@ -3,22 +3,15 @@ name = "leaf"
 version = "0.1.0"
 edition = "2021"
 
-resolver = "2"
-
 [workspace]
+resolver = "2"
 members = [
-    "common",
-    "client",
-    "server",
+    "tools",
+    "peer",
+    "client-cli",
 ]
 
-[dependencies]
-client = { path = "client" }
-tokio = { version = "1.40.0", features = ["full"] }
-clap = { version = "4.5.20", features = ["derive"] }
-serde = { version = "1.0.210", features = ["derive"] }
-serde_json = "1.0.132"
-
-[[bin]]
-name = "client-cli"
-path = "src/main.rs"
+[lib]
+name = "leaf_tools"
+path = "tools"
+crate-type = ["rlib"]

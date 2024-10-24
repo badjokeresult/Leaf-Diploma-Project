@@ -1,0 +1,12 @@
+[package]
+name = "peer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tools = { path = "../tools" }
+atomic_refcell = "0.1.13"
+
+[lib]
+name = "peer"
+path = "src/lib.rs"

@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 
 use errors::*;
-use crate::{Codec, DeflateCodec};
+use crate::codec::{Codec, DeflateCodec};
 
 #[repr(u8)]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -34,17 +34,17 @@ impl Message {
     }
 
     pub fn as_json(&self) -> Result<String, MessageSerializationError> {
-        return match serde_json::to_string(&self) {
+        match serde_json::to_string(&self) {
             Ok(j) => Ok(j.to_string()),
             Err(e) => Err(MessageSerializationError(e.to_string())),
-        };
+        }
     }
 
     pub fn from_json(message: &str) -> Result<Self, MessageDeserializationError> {
-        return match serde_json::from_str(message) {
+        match serde_json::from_str(message) {
             Ok(m) => Ok(m),
             Err(e) => Err(MessageDeserializationError(e.to_string())),
-        };
+        }
     }
 
     pub fn get_type(&self) -> MessageType {
@@ -86,6 +86,21 @@ impl From<u8> for MessageType {
     }
 }
 
+impl Into<Vec<u8>> for Message {
+    fn into(self) -> Vec<u8> {
+        let codec = DeflateCodec::new();
+        let json = self.as_json().unwrap();
+        codec.encode_message(&json).unwrap()
+    }
+}
+
+impl From<Vec<u8>> for Message {
+    fn from(value: Vec<u8>) -> Self {
+        let json = std::str::from_utf8(&value).unwrap();
+        Message::from_json(json).unwrap()
+    }
+}
+
 impl Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Message : [ type : {} , hash : {:#?} , data : {:#?} ]", match self.r#type {
@@ -95,38 +110,6 @@ impl Display for Message {
             MessageType::RetrievingAck => "RetrievingAck",
             MessageType::ContentFilled => "ContentFilled",
         }, self.hash, self.data.clone().unwrap())
-    }
-}
-
-pub struct MessageBuilder {
-    codec: DeflateCodec,
-}
-
-impl MessageBuilder {
-    pub fn new() -> MessageBuilder {
-        MessageBuilder {
-            codec: DeflateCodec::new(),
-        }
-    }
-
-    pub fn build_encoded_message(&self, msg_type: u8, hash: &[u8], data: Option<Vec<u8>>) -> Result<Vec<u8>, BuildingMessageError> {
-        match Message::new(msg_type, hash, data).as_json() {
-            Ok(j) => match self.codec.encode_message(&j) {
-                Ok(b) => Ok(b),
-                Err(e) => return Err(BuildingMessageError(e.to_string())),
-            },
-            Err(e) => Err(BuildingMessageError(e.to_string())),
-        }
-    }
-
-    pub fn deconstruct_encoded_message(&self, buf: &[u8]) -> Result<Message, ReconstructingMessageError> {
-        match self.codec.decode_message(buf) {
-            Ok(s) => match Message::from_json(&s) {
-                Ok(m) => Ok(m),
-                Err(e) => Err(ReconstructingMessageError(e.to_string())),
-            },
-            Err(e) => Err(ReconstructingMessageError(e.to_string())),
-        }
     }
 }
 

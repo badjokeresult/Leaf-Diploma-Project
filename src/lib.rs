@@ -1,28 +1,36 @@
-use common::{Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
+mod crypto;
+mod codec;
+mod tools;
 
-use peer::{BroadcastClientPeer, ClientPeer};
-
+mod client_peer;
+mod args;
+mod sentfile;
 mod peer;
+mod udpclient;
 
-pub async fn send_content(content: Vec<u8>) -> Vec<Option<Vec<u8>>> {
+use crypto::{Encryptor, KuznechikEncryptor};
+use shared_secret::{ReedSolomonSecretSharer, SecretSharer};
+use client_peer::{BroadcastClientPeer, ClientPeer};
+
+pub fn send_content(content: Vec<u8>) -> Vec<Option<Vec<u8>>> {
     let sharer = ReedSolomonSecretSharer::new();
     let (data_chunks, rec_chunks) = sharer.split_into_chunks(&content).unwrap();
 
     let encryptor = KuznechikEncryptor::new().unwrap();
     let (mut enc_data_chunks, mut enc_rec_chunks) = (Vec::with_capacity(data_chunks.len()), Vec::with_capacity(rec_chunks.len()));
     for chunk in data_chunks {
-        let enc_chunk = encryptor.encrypt_chunk(&chunk).await.unwrap();
+        let enc_chunk = encryptor.encrypt_chunk(&chunk).unwrap();
         enc_data_chunks.push(enc_chunk);
     }
     for chunk in rec_chunks {
-        let enc_chunk = encryptor.encrypt_chunk(&chunk).await.unwrap();
+        let enc_chunk = encryptor.encrypt_chunk(&chunk).unwrap();
         enc_rec_chunks.push(enc_chunk);
     }
 
     let mut hashes = Vec::with_capacity(enc_rec_chunks.len() + enc_data_chunks.len());
-    let client = BroadcastClientPeer::new().await;
+    let client = BroadcastClientPeer::new();
     for chunk in enc_data_chunks {
-        let hash = match client.send(&chunk).await {
+        let hash = match client.send(&chunk) {
             Ok(h) => Some(h),
             Err(_) => None,
         };
@@ -30,9 +38,9 @@ pub async fn send_content(content: Vec<u8>) -> Vec<Option<Vec<u8>>> {
     }
     for i in 0..enc_rec_chunks.len() {
         if hashes[i] == None {
-            let hash = match client.send(&enc_rec_chunks[i]).await {
+            let hash = match client.send(&enc_rec_chunks[i]) {
                 Ok(h) => Some(h),
-                Err(e) => panic!("Cannot send both data and recovery"),
+                Err(_) => panic!("Cannot send both data and recovery"),
             };
             hashes.push(hash);
         }
@@ -49,7 +57,7 @@ pub async fn recv_content(hashes: Vec<Option<Vec<u8>>>) -> Vec<u8> {
         } else {
             let chunk = match client.recv(&hash.unwrap()).await {
                 Ok(c) => c,
-                Err(e) => panic!("Cannot receive both data and recovery"),
+                Err(_) => panic!("Cannot receive both data and recovery"),
             };
             full_data.push(chunk);
         }
