@@ -20,7 +20,3 @@ local-ip-address = "0.6.3"
 name = "leaf"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
-
-[[bin]]
-name = "leaf-test"
-path = "src/main.rs"
