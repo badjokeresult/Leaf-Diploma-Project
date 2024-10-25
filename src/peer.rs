@@ -1,79 +1,81 @@
-use std::collections::HashMap;
+use std::io::Error;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::thread::JoinHandle;
-use atomic_refcell::AtomicRefCell;
-use tools::{Message, MessageType};
+use std::sync::{mpsc, Arc, Mutex, mpsc::{Receiver, Sender}};
+use std::thread::{JoinHandle, spawn};
 
-const MAX_DATAGRAM_SIZE: usize = 65507;
+use local_ip_address::{local_broadcast_ip, local_ip};
 
-pub struct Peer {
+use crate::message::Message;
+use crate::server::BroadcastUdpServer;
+
+pub struct BroadcastUdpPeer {
     socket: Arc<Mutex<UdpSocket>>,
-    storage: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    server: Arc<Mutex<BroadcastUdpServer>>,
+    to_client_sender: Sender<(Message, SocketAddr)>,
 }
 
-impl Peer {
-    pub fn new(addr: SocketAddr) -> Peer {
-        let socket = Arc::new(Mutex::new(UdpSocket::bind(addr).unwrap()));
-        let storage = AtomicRefCell::new(HashMap::new());
+const MAX_DATAGRAM_SIZE: usize = 65_507;
 
-        Peer { socket, storage }
+impl BroadcastUdpPeer {
+    pub fn new() -> Result<(BroadcastUdpPeer, Receiver<(Message, SocketAddr)>), Error> {
+        let addr = SocketAddr::new(local_ip().unwrap(), 62092);
+        let socket = Arc::new(Mutex::new(UdpSocket::bind(addr)?));
+        let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
+        let (to_client_sender, to_client_receiver) = mpsc::channel::<(Message, SocketAddr)>();
+
+        Ok((BroadcastUdpPeer {
+            socket,
+            server,
+            to_client_sender,
+        }, to_client_receiver))
     }
 
-    pub fn run(&self, num_threads: usize) -> Vec<JoinHandle<()>> {
-        for _ in 0..num_threads {
-            let socket = Arc::clone(&self.socket);
+    pub fn listen(&self, num_threads: usize) -> Vec<JoinHandle<()>> {
+        let mut handles = vec![];
 
+        for _ in 0..num_threads {
+            let server = Arc::clone(&self.server);
+            let socket = Arc::clone(&self.socket);
+            let sender = self.to_client_sender.clone();
             let mut buf = [0u8; MAX_DATAGRAM_SIZE];
-            thread::spawn(move || {
+
+            let handle = spawn(move || {
                 loop {
                     match socket.lock().unwrap().recv_from(&mut buf) {
                         Ok((s, a)) => {
-                            let message = Message::from(&buf[..s]);
-                            match message.get_type() {
-                                MessageType::SendingReq => {
-                                    self.handle_sending_req(&message.get_hash());
-                                    let answer = Message::new(MessageType::SendingAck.into(), &message.get_hash(), None);
-                                    socket.lock().unwrap().send_to(&message.into(), a).unwrap();
+                            let message = Message::from(buf[..s].to_vec());
+                            match message {
+                                Message::SendingReq(h) => {
+                                    let answer = server.lock().unwrap().handle_sending_req(&h).unwrap();
+                                    socket.lock().unwrap().send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
                                 },
-                                MessageType::RetrievingReq => {
-                                    let data = self.handle_retrieving_req(&message.get_hash());
-                                    let answer = Message::new(MessageType::RetrievingAck.into(), &message.get_hash(), Some(data));
-                                    socket.lock().unwrap().send_to(&message.into(), a).unwrap();
+                                Message::RetrievingReq(h) => {
+                                    let chunks = server.lock().unwrap().handle_retrieving_req(&h).unwrap();
+                                    for chunk in chunks {
+                                        socket.lock().unwrap().send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
+                                    }
                                 },
-                                MessageType::RetrievingAck => {
-
-                                }
-                            }
-                        }
-                    }
+                                _ => sender.send((message, a)).unwrap(),
+                            };
+                        },
+                        Err(e) => panic!("{}", e.to_string()),
+                    };
                 }
-            })
+                ()
+            });
+            handles.push(handle);
         }
+        handles
     }
 
-    fn handle_sending_req(&self, hash: &[u8]) {
-        if self.is_enough_mem() {
-            self.alloc_mem_for_chunk(hash);
-        }
+    pub fn send_req(&self, data: &[u8]) -> Result<(), Error> {
+        let broadcast = SocketAddr::new(local_broadcast_ip().unwrap(), 62092);
+        self.socket.lock().unwrap().send_to(data, broadcast)?;
+        Ok(())
     }
 
-    fn handle_retrieving_req(&self, hash: &[u8]) -> Vec<u8> {
-
-    }
-
-    fn is_enough_mem(&self) -> bool {
-        true
-    }
-
-    fn alloc_mem_for_chunk(&self, hash: &[u8]) {
-        match self.storage.borrow().get(hash) {
-            Some(d) => panic!(),
-            None => {
-                self.storage.borrow_mut().insert(hash.to_vec(), vec![]);
-                return;
-            }
-        };
+    pub fn send_content(&self, data: &[u8], addr: SocketAddr) -> Result<(), Error> {
+        self.socket.lock().unwrap().send_to(data, addr)?;
+        Ok(())
     }
 }
