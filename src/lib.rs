@@ -17,7 +17,8 @@ mod shared_secret;
 #[no_mangle]
 pub extern "C" fn init() -> *const c_void {
     let client = Box::new(BroadcastUdpClient::new());
-    Box::into_raw(client).cast()
+    let ptr: *const c_void = Box::into_raw(client) as *const c_void;
+    ptr
 }
 
 #[no_mangle]
