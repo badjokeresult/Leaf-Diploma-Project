@@ -1,6 +1,3 @@
-use std::fmt::Display;
-use std::hash::Hash;
-
 use serde::{Deserialize, Serialize};
 
 use errors::*;
@@ -89,8 +86,9 @@ impl Into<Vec<u8>> for Message {
 
 impl From<Vec<u8>> for Message {
     fn from(value: Vec<u8>) -> Self {
-        let json = std::str::from_utf8(&value).unwrap();
-        Message::from_json(json).unwrap()
+        let codec = DeflateCodec::new();
+        let json = codec.decode_message(&value).unwrap();
+        Message::from_json(&json).unwrap()
     }
 }
 

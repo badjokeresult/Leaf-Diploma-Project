@@ -44,6 +44,7 @@ pub fn send_file(content: Vec<u8>, client: &BroadcastUdpClient) -> Vec<Option<Ve
 
     let hasher = StreebogHasher::new();
     let mut errors_amount = 0;
+    let errors_crit_amount = enc_chunks.len() / 2 + 1;
     let mut hashes = vec![];
     for chunk in enc_chunks {
         if let Some(x) = chunk {
@@ -56,6 +57,9 @@ pub fn send_file(content: Vec<u8>, client: &BroadcastUdpClient) -> Vec<Option<Ve
                     continue;
                 },
             };
+            if errors_amount > errors_crit_amount {
+                panic!("Error sending chunks");
+            }
         }
     }
 

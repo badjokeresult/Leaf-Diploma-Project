@@ -95,7 +95,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
         Ok(chunks)
     }
 
-    fn recover_from_chunks(&self, mut chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError> {
+    fn recover_from_chunks(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError> {
         let mut full_data = chunks.par_iter().cloned().map(|x| {
             if let Some(d) = x {
                 Some(d)

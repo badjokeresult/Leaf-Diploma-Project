@@ -72,7 +72,7 @@ impl BroadcastUdpServer {
 
     pub fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
         match self.storage.borrow_mut().get(hash) {
-            Some(mut c) => {
+            Some(c) => {
                 let mut binding = c.clone();
                 binding.extend_from_slice(data);
             },

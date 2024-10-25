@@ -55,13 +55,16 @@ impl BroadcastUdpPeer {
                                         socket.lock().unwrap().send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
                                     }
                                 },
+                                Message::ContentFilled(h, d) => match server.lock().unwrap().handle_content_filled(&h, &d) {
+                                    Ok(_) => {},
+                                    Err(e) => eprintln!("{}", e.to_string()),
+                                },
                                 _ => sender.send((message, a)).unwrap(),
                             };
                         },
                         Err(e) => panic!("{}", e.to_string()),
                     };
                 }
-                ()
             });
             handles.push(handle);
         }
