@@ -103,7 +103,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
                 None
             }
         }).collect::<Vec<_>>();
-        let blocks_len = full_data.len();
+        let blocks_len = full_data.len() / 2;
 
         let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(blocks_len, blocks_len).unwrap();
         decoder.reconstruct_data(&mut full_data).unwrap();
