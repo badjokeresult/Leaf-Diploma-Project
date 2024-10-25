@@ -10,8 +10,9 @@ pub struct BroadcastUdpClient {
 }
 
 impl BroadcastUdpClient {
-    pub fn new() -> BroadcastUdpClient {
+    pub fn new(num_threads: usize) -> BroadcastUdpClient {
         let (peer, from_peer_receiver) = BroadcastUdpPeer::new().unwrap();
+        peer.listen(num_threads);
 
         BroadcastUdpClient {
             peer,

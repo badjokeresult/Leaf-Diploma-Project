@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 use crate::client::BroadcastUdpClient;
 use crate::crypto::{Encryptor, KuznechikEncryptor};
 use crate::hash::{Hasher, StreebogHasher};
@@ -20,8 +18,11 @@ mod shared_secret;
 //     ptr
 // }
 
+const NUM_THREADS: usize = 8;
+
 pub fn init() -> BroadcastUdpClient {
-    BroadcastUdpClient::new()
+    let client = BroadcastUdpClient::new(NUM_THREADS);
+    client
 }
 
 pub fn send_file(content: Vec<u8>, client: &BroadcastUdpClient) -> Vec<Option<Vec<u8>>> {
