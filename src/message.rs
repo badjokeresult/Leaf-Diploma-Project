@@ -1,35 +1,66 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
+use std::hash::Hash;
 
 use serde::{Deserialize, Serialize};
 
 use errors::*;
 use crate::codec::{Codec, DeflateCodec};
 
-#[repr(u8)]
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-pub enum MessageType {
-    SendingReq = 0,
-    RetrievingReq = 1,
-    SendingAck = 2,
-    RetrievingAck = 3,
-    ContentFilled = 4,
+pub enum Message {
+    SendingReq(Vec<u8>),
+    SendingAck(Vec<u8>),
+    RetrievingReq(Vec<u8>),
+    RetrievingAck(Vec<u8>, Vec<u8>),
+    ContentFilled(Vec<u8>, Vec<u8>),
+    Empty(Vec<u8>),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Message {
-    r#type: MessageType,
-    hash: Vec<u8>,
-    data: Option<Vec<u8>>,
+pub mod consts {
+    pub const SENDING_REQUEST_TYPE: u8 = 0;
+    pub const SENDING_ACKNOWLEDGEMENT_TYPE: u8 = 1;
+    pub const RETRIEVING_REQUEST_TYPE: u8 = 2;
+    pub const RETRIEVING_ACKNOWLEDGEMENT_TYPE: u8 = 3;
+    pub const CONTENT_FILLED_TYPE: u8 = 4;
+    pub const EMPTY_TYPE: u8 = 5;
+    pub const DEFAULT_MESSAGE_DATA_SIZE: usize = 65243;
 }
+
+// #[derive(Serialize, Deserialize, Clone)]
+// pub struct Message {
+//     r#type: MessageType,
+//     hash: Vec<u8>,
+//     data: Option<Vec<u8>>,
+// }
 
 impl Message {
-    pub fn new(msg_type_num: u8, hash: &[u8], data: Option<Vec<u8>>) -> Message {
-        let r#type = MessageType::from(msg_type_num);
+    pub fn new_with_data(msg_type_num: u8, hash: &[u8], data: Vec<u8>) -> Vec<Message> {
+        assert_eq!(data.len(), 0);
 
-        Message {
-            r#type,
-            hash: hash.to_vec(),
-            data,
+        let chunks = data.chunks(consts::DEFAULT_MESSAGE_DATA_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
+
+        let mut messages = vec![];
+
+        for chunk in chunks {
+            messages.push(
+                match msg_type_num {
+                    consts::RETRIEVING_ACKNOWLEDGEMENT_TYPE => Message::RetrievingAck(hash.to_vec(), chunk),
+                    consts::CONTENT_FILLED_TYPE => Message::ContentFilled(hash.to_vec(), chunk),
+                    _ => panic!("Invalid message type selected"),
+                }
+            );
+        }
+
+        messages
+    }
+
+    pub fn new(msg_type_num: u8, hash: &[u8]) -> Message {
+        match msg_type_num {
+            consts::SENDING_REQUEST_TYPE => Message::SendingReq(hash.to_vec()),
+            consts::SENDING_ACKNOWLEDGEMENT_TYPE => Message::SendingAck(hash.to_vec()),
+            consts::RETRIEVING_REQUEST_TYPE => Message::RetrievingReq(hash.to_vec()),
+            consts::EMPTY_TYPE => Message::Empty(hash.to_vec()),
+            _ => panic!("Invalid message type selected"),
         }
     }
 
@@ -46,44 +77,6 @@ impl Message {
             Err(e) => Err(MessageDeserializationError(e.to_string())),
         }
     }
-
-    pub fn get_type(&self) -> MessageType {
-        self.r#type.clone()
-    }
-
-    pub fn get_hash(&self) -> Vec<u8> {
-        self.hash.to_vec()
-    }
-
-    pub fn get_data(&self) -> Option<Vec<u8>> {
-        let data = self.data.clone().unwrap();
-        Some(data)
-    }
-}
-
-impl Into<u8> for MessageType {
-    fn into(self) -> u8 {
-        match self {
-            MessageType::SendingAck => 2,
-            MessageType::ContentFilled => 4,
-            MessageType::RetrievingAck => 3,
-            MessageType::RetrievingReq => 1,
-            MessageType::SendingReq => 0,
-        }
-    }
-}
-
-impl From<u8> for MessageType {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => MessageType::SendingReq,
-            4 => MessageType::ContentFilled,
-            2 => MessageType::SendingAck,
-            1 => MessageType::RetrievingReq,
-            3 => MessageType::RetrievingAck,
-            _ => panic!(),
-        }
-    }
 }
 
 impl Into<Vec<u8>> for Message {
@@ -98,18 +91,6 @@ impl From<Vec<u8>> for Message {
     fn from(value: Vec<u8>) -> Self {
         let json = std::str::from_utf8(&value).unwrap();
         Message::from_json(json).unwrap()
-    }
-}
-
-impl Display for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Message : [ type : {} , hash : {:#?} , data : {:#?} ]", match self.r#type {
-            MessageType::SendingReq => "SendingReq",
-            MessageType::RetrievingReq => "RetrievingReq",
-            MessageType::SendingAck => "SendingAck",
-            MessageType::RetrievingAck => "RetrievingAck",
-            MessageType::ContentFilled => "ContentFilled",
-        }, self.hash, self.data.clone().unwrap())
     }
 }
 
