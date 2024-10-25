@@ -14,16 +14,18 @@ mod peer;
 mod server;
 mod shared_secret;
 
-#[no_mangle]
-pub extern "C" fn init() -> *const c_void {
-    let client = Box::new(BroadcastUdpClient::new());
-    let ptr: *const c_void = Box::into_raw(client) as *const c_void;
-    ptr
+// pub fn init() -> *const c_void {
+//     let client = Box::new(BroadcastUdpClient::new());
+//     let ptr: *const c_void = Box::into_raw(client) as *const c_void;
+//     ptr
+// }
+
+pub fn init() -> BroadcastUdpClient {
+    BroadcastUdpClient::new()
 }
 
-#[no_mangle]
-pub extern "C" fn send_file(content: Vec<u8>, client_ptr: *const c_void) -> Vec<Option<Vec<u8>>> {
-    let client = unsafe { &*(client_ptr as *const BroadcastUdpClient) };
+pub fn send_file(content: Vec<u8>, client: &BroadcastUdpClient) -> Vec<Option<Vec<u8>>> {
+    //let client = unsafe { &*(client_ptr as *const BroadcastUdpClient) };
 
     let sharer = ReedSolomonSecretSharer::new();
     let chunks = sharer.split_into_chunks(&content).unwrap();
@@ -59,9 +61,8 @@ pub extern "C" fn send_file(content: Vec<u8>, client_ptr: *const c_void) -> Vec<
     hashes
 }
 
-#[no_mangle]
-pub extern "C" fn recv_content(hashes: Vec<Option<Vec<u8>>>, client_ptr: *const c_void) -> Vec<u8> {
-    let client = unsafe { &*(client_ptr as *const BroadcastUdpClient) };
+pub fn recv_content(hashes: Vec<Option<Vec<u8>>>, client: &BroadcastUdpClient) -> Vec<u8> {
+    //let client = unsafe { &*(client_ptr as *const BroadcastUdpClient) };
 
     let mut chunks = vec![None; hashes.len()];
     for i in 0..hashes.len() {
@@ -86,8 +87,6 @@ pub extern "C" fn recv_content(hashes: Vec<Option<Vec<u8>>>, client_ptr: *const 
     content
 }
 
-#[no_mangle]
-pub extern "C" fn shutdown(ptr: *mut c_void) {
-    let client = unsafe { &*(ptr as *mut BroadcastUdpClient) };
+pub fn shutdown(client: BroadcastUdpClient) {
     client.shutdown();
 }
