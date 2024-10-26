@@ -113,17 +113,16 @@ mod init {
         }
 
         pub fn load_passwd(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
-            if let Err(_) = fs::read_to_string(&self.0) {
+            if let Err(_) = fs::read(&self.0) {
                 match self.init_password_at_first_launch(32) {
                     Ok(_) => {},
                     Err(e) => return Err(LoadingCredentialsError(e.to_string())),
                 };
             }
-            let binding = match fs::read(&self.0) {
+            let content = match fs::read(&self.0) {
                 Ok(s) => s,
                 Err(e) => return Err(LoadingCredentialsError(e.to_string())),
             };
-            let content = binding.to_vec();
 
             Ok(content)
         }
@@ -159,7 +158,7 @@ mod init {
         }
 
         pub fn load_gamma(&self) -> Result<Vec<u8>, LoadingCredentialsError> {
-            if let Err(_) = fs::read_to_string(&self.0) {
+            if let Err(_) = fs::read(&self.0) {
                 match self.init_gamma_at_first_launch(32) {
                     Ok(_) => {},
                     Err(e) => return Err(LoadingCredentialsError(e.to_string())),
@@ -170,7 +169,7 @@ mod init {
                 Ok(s) => s,
                 Err(e) => return Err(LoadingCredentialsError(e.to_string())),
             };
-            let gamma = gamma.to_vec();
+
             Ok(gamma)
         }
 
