@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-
+use std::ops::Index;
 use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
 
@@ -76,21 +76,8 @@ impl SecretSharer for ReedSolomonSecretSharer {
         }
 
         encoder.encode(&mut blocks).unwrap();
-
-        let chunks = blocks.iter().map(|x| {
-            let mut flag = false;
-            for item in x {
-                if !0u8.eq(item) {
-                    flag = true;
-                    break;
-                }
-            }
-            if flag {
-                None
-            } else {
-                Some(x.clone())
-            }
-        }).collect::<Vec<_>>();
+        println!("{:?}", blocks);
+        let chunks = blocks.par_iter().cloned().map(Some).collect::<Vec<_>>();
 
         Ok(chunks)
     }
@@ -115,7 +102,11 @@ impl SecretSharer for ReedSolomonSecretSharer {
             secret.append(&mut value);
         }
 
-        let secret = secret.par_iter().cloned().filter(|x| x.clone() > 0u8).collect::<Vec<_>>();
+        let secret = match secret.iter().position(|x| 0u8.eq(x)) {
+            Some(p) => secret.split_at(p).0.to_vec(),
+            None => secret,
+        };
+
         Ok(secret)
     }
 }
