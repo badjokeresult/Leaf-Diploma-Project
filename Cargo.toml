@@ -14,7 +14,8 @@ reed-solomon-erasure = "6.0.0"
 rayon = "1.10.0"
 atomic_refcell = "0.1.13"
 dirs = "5.0.1"
-local-ip-address = "0.6.3"
+winapi = "0.3.9"
+libc = "0.2.161"
 
 [lib]
 name = "leaf"
