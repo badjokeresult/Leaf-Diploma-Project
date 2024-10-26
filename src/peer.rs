@@ -20,6 +20,7 @@ impl BroadcastUdpPeer {
     pub fn new() -> Result<(BroadcastUdpPeer, Receiver<(Message, SocketAddr)>), Error> {
         let addr = SocketAddr::new(local_ip().unwrap(), 62092);
         let socket = Arc::new(Mutex::new(UdpSocket::bind(addr)?));
+        socket.lock().unwrap().set_broadcast(true).unwrap();
         let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
         let (to_client_sender, to_client_receiver) = mpsc::channel::<(Message, SocketAddr)>();
 
