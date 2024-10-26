@@ -1,9 +1,7 @@
 use std::io::Error;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::{mpsc, Arc, Mutex, mpsc::{Receiver, Sender}};
 use std::thread::{JoinHandle, spawn};
-
-use local_ip_address::{local_broadcast_ip, local_ip};
 
 use crate::message::Message;
 use crate::server::BroadcastUdpServer;
@@ -12,13 +10,14 @@ pub struct BroadcastUdpPeer {
     socket: Arc<Mutex<UdpSocket>>,
     server: Arc<Mutex<BroadcastUdpServer>>,
     to_client_sender: Sender<(Message, SocketAddr)>,
+    broadcast_addr: IpAddr,
 }
 
 const MAX_DATAGRAM_SIZE: usize = 65_507;
 
 impl BroadcastUdpPeer {
-    pub fn new() -> Result<(BroadcastUdpPeer, Receiver<(Message, SocketAddr)>), Error> {
-        let addr = SocketAddr::new(local_ip().unwrap(), 62092);
+    pub fn new(local_ip: IpAddr, local_broadcast: IpAddr) -> Result<(BroadcastUdpPeer, Receiver<(Message, SocketAddr)>), Error> {
+        let addr = SocketAddr::new(local_ip, 62092);
         let socket = Arc::new(Mutex::new(UdpSocket::bind(addr)?));
         socket.lock().unwrap().set_broadcast(true).unwrap();
         let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
@@ -28,6 +27,7 @@ impl BroadcastUdpPeer {
             socket,
             server,
             to_client_sender,
+            broadcast_addr: local_broadcast,
         }, to_client_receiver))
     }
 
@@ -73,7 +73,7 @@ impl BroadcastUdpPeer {
     }
 
     pub fn send_req(&self, data: &[u8]) -> Result<(), Error> {
-        let broadcast = SocketAddr::new(local_broadcast_ip().unwrap(), 62092);
+        let broadcast = SocketAddr::new(self.broadcast_addr, 62092);
         self.socket.lock().unwrap().send_to(data, broadcast)?;
         Ok(())
     }

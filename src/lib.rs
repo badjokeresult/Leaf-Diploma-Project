@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+use std::str::FromStr;
 use crate::client::BroadcastUdpClient;
 use crate::crypto::{Encryptor, KuznechikEncryptor};
 use crate::hash::{Hasher, StreebogHasher};
@@ -20,8 +22,12 @@ mod shared_secret;
 
 const NUM_THREADS: usize = 8;
 
-pub fn init() -> BroadcastUdpClient {
-    let client = BroadcastUdpClient::new(NUM_THREADS);
+const LOCAL_BROADCAST: &str = "192.168.124.255";
+
+pub fn init(local_ip: &str) -> BroadcastUdpClient {
+    let local_ip = IpAddr::from_str(local_ip).unwrap();
+    let local_broadcast = IpAddr::from_str(LOCAL_BROADCAST).unwrap();
+    let client = BroadcastUdpClient::new(NUM_THREADS, local_ip, local_broadcast);
     client
 }
 

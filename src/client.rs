@@ -1,5 +1,5 @@
 use std::io::Error;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::Receiver;
 use crate::message::{Message, consts::*};
 use crate::peer::BroadcastUdpPeer;
@@ -10,8 +10,8 @@ pub struct BroadcastUdpClient {
 }
 
 impl BroadcastUdpClient {
-    pub fn new(num_threads: usize) -> BroadcastUdpClient {
-        let (peer, from_peer_receiver) = BroadcastUdpPeer::new().unwrap();
+    pub fn new(num_threads: usize, local_ip: IpAddr, local_broadcast: IpAddr) -> BroadcastUdpClient {
+        let (peer, from_peer_receiver) = BroadcastUdpPeer::new(local_ip, local_broadcast).unwrap();
         peer.listen(num_threads);
 
         BroadcastUdpClient {
