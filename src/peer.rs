@@ -36,7 +36,7 @@ impl BroadcastUdpPeer {
         }, to_client_receiver))
     }
 
-    pub fn listen(&self) -> JoinHandle<()> {
+    pub fn listen(&'static self) -> JoinHandle<()> {
         thread::spawn(move || {
             loop {
                 let mut buf = [0u8; MAX_DATAGRAM_SIZE];
