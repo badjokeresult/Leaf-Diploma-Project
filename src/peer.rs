@@ -37,25 +37,24 @@ impl BroadcastUdpPeer {
     }
 
     pub fn listen(&self) -> JoinHandle<()> {
-        let socket = self.socket.try_clone().unwrap();
         let server = self.server.clone();
         let to_client_sender = self.to_client_sender.clone();
         let mut buf = [0u8; MAX_DATAGRAM_SIZE];
 
         thread::spawn(move || {
             loop {
-                match socket.recv_from(&mut buf) {
+                match self.socket.recv_from(&mut buf) {
                     Ok((s, a)) => {
                         let message = Message::from(buf[..s].to_vec());
                         match message {
                             Message::SendingReq(h) => {
                                 let answer = server.lock().unwrap().handle_sending_req(&h).unwrap();
-                                socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
+                                self.socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
                             },
                             Message::RetrievingReq(h) => {
                                 let chunks = server.lock().unwrap().handle_retrieving_req(&h).unwrap();
                                 for chunk in chunks {
-                                    socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
+                                    self.socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
                                 }
                             },
                             Message::ContentFilled(h, d) => match server.lock().unwrap().handle_content_filled(&h, &d) {
