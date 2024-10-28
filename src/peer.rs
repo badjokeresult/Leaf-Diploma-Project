@@ -1,6 +1,6 @@
 use std::io::Error;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
-use std::sync::{mpsc, mpsc::{Receiver, Sender}};
+use std::sync::{mpsc, mpsc::{Receiver, Sender}, Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -11,7 +11,7 @@ use crate::server::BroadcastUdpServer;
 
 pub struct BroadcastUdpPeer {
     socket: UdpSocket,
-    server: BroadcastUdpServer,
+    server: Arc<Mutex<BroadcastUdpServer>>,
     to_client_sender: Sender<(Message, SocketAddr)>,
     broadcast_addr: IpAddr,
 }
@@ -25,7 +25,7 @@ impl BroadcastUdpPeer {
         socket.set_broadcast(true)?;
         socket.set_read_timeout(Some(Duration::new(5, 0)))?;
         socket.set_write_timeout(Some(Duration::new(3, 0)))?;
-        let server = BroadcastUdpServer::new();
+        let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
         let (to_client_sender, to_client_receiver) = mpsc::channel::<(Message, SocketAddr)>();
 
         Ok((BroadcastUdpPeer {
@@ -45,16 +45,16 @@ impl BroadcastUdpPeer {
                         let message = Message::from(buf[..s].to_vec());
                         match message {
                             Message::SendingReq(h) => {
-                                let answer = self.server.handle_sending_req(&h).unwrap();
+                                let answer = self.server.lock().unwrap().handle_sending_req(&h).unwrap();
                                 self.socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
                             },
                             Message::RetrievingReq(h) => {
-                                let chunks = self.server.handle_retrieving_req(&h).unwrap();
+                                let chunks = self.server.lock().unwrap().handle_retrieving_req(&h).unwrap();
                                 for chunk in chunks {
                                     self.socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
                                 }
                             },
-                            Message::ContentFilled(h, d) => match self.server.handle_content_filled(&h, &d) {
+                            Message::ContentFilled(h, d) => match self.server.lock().unwrap().handle_content_filled(&h, &d) {
                                 Ok(_) => {},
                                 Err(e) => eprintln!("{}", e.to_string()),
                             },
