@@ -32,7 +32,7 @@ pub mod consts {
 
 impl Message {
     pub fn new_with_data(msg_type_num: u8, hash: &[u8], data: Vec<u8>) -> Vec<Message> {
-        assert_eq!(data.len(), 0);
+        assert_ne!(data.len(), 0);
 
         let chunks = data.chunks(consts::DEFAULT_MESSAGE_DATA_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
