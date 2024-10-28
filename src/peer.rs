@@ -2,7 +2,8 @@ use std::io::Error;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::{mpsc, Arc, Mutex, mpsc::{Receiver, Sender}};
 use std::thread::{JoinHandle, spawn};
-
+use net2::UdpBuilder;
+use net2::unix::UnixUdpBuilderExt;
 use crate::message::Message;
 use crate::server::BroadcastUdpServer;
 
@@ -18,8 +19,8 @@ const MAX_DATAGRAM_SIZE: usize = 65_507;
 impl BroadcastUdpPeer {
     pub fn new(local_ip: IpAddr, local_broadcast: IpAddr) -> Result<(BroadcastUdpPeer, Receiver<(Message, SocketAddr)>), Error> {
         let addr = SocketAddr::new(local_ip, 62092);
-        let socket = Arc::new(Mutex::new(UdpSocket::bind(addr)?));
-        socket.lock().unwrap().set_broadcast(true).unwrap();
+        let socket = Arc::new(Mutex::new(UdpBuilder::new_v4()?.reuse_address(true)?.reuse_port(true)?.bind(addr)?));
+        socket.lock().unwrap().set_broadcast(true)?;
         let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
         let (to_client_sender, to_client_receiver) = mpsc::channel::<(Message, SocketAddr)>();
 
