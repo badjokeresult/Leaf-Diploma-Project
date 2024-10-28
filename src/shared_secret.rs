@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-use std::ops::Index;
+
 use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
 

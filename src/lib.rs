@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 use std::str::FromStr;
+
 use crate::client::BroadcastUdpClient;
 use crate::crypto::{Encryptor, KuznechikEncryptor};
 use crate::hash::{Hasher, StreebogHasher};
@@ -14,26 +15,13 @@ mod peer;
 mod server;
 mod shared_secret;
 
-// pub fn init() -> *const c_void {
-//     let client = Box::new(BroadcastUdpClient::new());
-//     let ptr: *const c_void = Box::into_raw(client) as *const c_void;
-//     ptr
-// }
-
-const NUM_THREADS: usize = 8;
-
-const LOCAL_BROADCAST: &str = "192.168.124.255";
-
-pub fn init(local_ip: &str) -> BroadcastUdpClient {
+pub fn init(local_ip: &str, local_broadcast: &str, num_threads: usize) -> BroadcastUdpClient {
     let local_ip = IpAddr::from_str(local_ip).unwrap();
-    let local_broadcast = IpAddr::from_str(LOCAL_BROADCAST).unwrap();
-    let client = BroadcastUdpClient::new(NUM_THREADS, local_ip, local_broadcast);
-    client
+    let local_broadcast = IpAddr::from_str(local_broadcast).unwrap();
+    BroadcastUdpClient::new(num_threads, local_ip, local_broadcast)
 }
 
 pub fn send_file(content: Vec<u8>, client: &BroadcastUdpClient) -> Vec<Option<Vec<u8>>> {
-    //let client = unsafe { &*(client_ptr as *const BroadcastUdpClient) };
-
     let sharer = ReedSolomonSecretSharer::new();
     let chunks = sharer.split_into_chunks(&content).unwrap();
 
@@ -73,8 +61,6 @@ pub fn send_file(content: Vec<u8>, client: &BroadcastUdpClient) -> Vec<Option<Ve
 }
 
 pub fn recv_content(hashes: Vec<Option<Vec<u8>>>, client: &BroadcastUdpClient) -> Vec<u8> {
-    //let client = unsafe { &*(client_ptr as *const BroadcastUdpClient) };
-
     let mut chunks = vec![None; hashes.len()];
     for i in 0..hashes.len() {
         if let Some(hash) = &hashes[i] {
