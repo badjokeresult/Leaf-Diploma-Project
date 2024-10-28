@@ -11,7 +11,7 @@ mod codec;
 mod crypto;
 mod hash;
 mod message;
-mod peer;
+mod server;
 mod server;
 mod shared_secret;
 

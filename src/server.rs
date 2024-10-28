@@ -1,83 +1,80 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fs;
-use std::io::{Error, ErrorKind};
-use std::path::PathBuf;
+use std::io::Error;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::sync::{mpsc, mpsc::{Receiver, Sender}, Arc, Mutex};
+use std::thread;
+use std::thread::JoinHandle;
+use std::time::Duration;
+use net2::UdpBuilder;
+use net2::unix::UnixUdpBuilderExt;
+use crate::message::Message;
 
-use serde::{Deserialize, Serialize};
-
-use crate::message::{Message, consts::*};
-
-mod consts {
-    pub const DEFAULT_WORKING_DIR: &str = ".leaf";
-    pub const DEFAULT_STOR_FILE_NAME: &str = "stor.bin";
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct BroadcastUdpServer {
-    storage: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
-
+    socket: UdpSocket,
+    to_client_sender: Sender<(Message, SocketAddr)>,
 }
 
-impl BroadcastUdpServer {
-    pub fn new() -> BroadcastUdpServer {
-        let filepath = dirs::home_dir().unwrap().join(consts::DEFAULT_WORKING_DIR).join(consts::DEFAULT_STOR_FILE_NAME);
-        let server = Self::from_file(filepath).unwrap_or_else(|_| BroadcastUdpServer { storage: RefCell::new(HashMap::new()) });
-        server
-    }
-
-    fn from_file(filepath: PathBuf) -> Result<BroadcastUdpServer, Error> {
-        let content = match fs::read(filepath) {
-            Ok(c) => c,
-            Err(e) => return Err(Error::new(ErrorKind::InvalidData, e.to_string())),
-        };
-        let server = serde_json::from_slice(&content)?;
-        Ok(server)
-    }
-}
+const MAX_DATAGRAM_SIZE: usize = 65_507;
 
 impl BroadcastUdpServer {
-    pub fn handle_sending_req(&self, hash: &[u8]) -> Result<Message, Error> {
-        match self.alloc_mem_for_chunk(hash) {
-            Ok(_) => Ok(Message::new(SENDING_ACKNOWLEDGEMENT_TYPE, hash)),
-            Err(e) => Err(e),
-        }
+    pub fn new(local_ip: IpAddr, local_broadcast: IpAddr) -> Result<(BroadcastUdpServer, Receiver<(Message, SocketAddr)>), Error> {
+        let addr = SocketAddr::new(local_ip, 62092);
+        let socket = UdpBuilder::new_v4()?.reuse_address(true)?.reuse_port(true)?.bind(addr)?;
+        socket.set_broadcast(true)?;
+        socket.set_read_timeout(Some(Duration::new(5, 0)))?;
+        socket.set_write_timeout(Some(Duration::new(3, 0)))?;
+        let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
+        let (to_client_sender, to_client_receiver) = mpsc::channel::<(Message, SocketAddr)>();
+
+        Ok((BroadcastUdpServer {
+            socket,
+            server,
+            to_client_sender,
+            broadcast_addr: local_broadcast,
+        }, to_client_receiver))
     }
 
-    fn alloc_mem_for_chunk(&self, hash: &[u8]) -> Result<(), Error> {
-        if self.is_enough_mem_for_chunk() {
-            self.storage.borrow_mut().insert(hash.to_vec(), vec![]);
-            return Ok(());
-        }
-        Err(Error::new(ErrorKind::InvalidData, "Not enough memory"))
+    pub fn listen(&self) -> JoinHandle<()> {
+        let server = self.server.clone();
+        let to_client_sender = self.to_client_sender.clone();
+        let mut buf = [0u8; MAX_DATAGRAM_SIZE];
+
+        thread::spawn(move || {
+            loop {
+                match self.socket.recv_from(&mut buf) {
+                    Ok((s, a)) => {
+                        let message = Message::from(buf[..s].to_vec());
+                        match message {
+                            Message::SendingReq(h) => {
+                                let answer = server.lock().unwrap().handle_sending_req(&h).unwrap();
+                                self.socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
+                            },
+                            Message::RetrievingReq(h) => {
+                                let chunks = server.lock().unwrap().handle_retrieving_req(&h).unwrap();
+                                for chunk in chunks {
+                                    self.socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
+                                }
+                            },
+                            Message::ContentFilled(h, d) => match server.lock().unwrap().handle_content_filled(&h, &d) {
+                                Ok(_) => {},
+                                Err(e) => eprintln!("{}", e.to_string()),
+                            },
+                            _ => to_client_sender.send((message, a)).unwrap(),
+                        };
+                    },
+                    Err(e) => panic!("{}", e.to_string()),
+                };
+            }
+        })
     }
 
-    fn is_enough_mem_for_chunk(&self) -> bool {
-        true
+    pub fn send_req(&self, data: &[u8]) -> Result<(), Error> {
+        let broadcast = SocketAddr::new(self.broadcast_addr, 62092);
+        self.socket.send_to(data, broadcast)?;
+        Ok(())
     }
 
-    pub fn handle_retrieving_req(&self, hash: &[u8]) -> Result<Vec<Message>, Error> {
-        let chunk = self.retrieve_chunk(hash)?;
-        let mut answer = Message::new_with_data(RETRIEVING_ACKNOWLEDGEMENT_TYPE, hash, chunk);
-        answer.push(Message::new(EMPTY_TYPE, hash));
-        Ok(answer)
-    }
-
-    fn retrieve_chunk(&self, hash: &[u8]) -> Result<Vec<u8>, Error> {
-        match self.storage.borrow().get(hash) {
-            Some(c) => Ok(c.clone()),
-            None => Err(Error::new(ErrorKind::InvalidData, "Not found")),
-        }
-    }
-
-    pub fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
-        match self.storage.borrow_mut().get(hash) {
-            Some(c) => {
-                let mut binding = c.clone();
-                binding.extend_from_slice(data);
-            },
-            None => return Err(Error::new(ErrorKind::InvalidData, "Not found")),
-        };
+    pub fn send_content(&self, data: &[u8], addr: SocketAddr) -> Result<(), Error> {
+        self.socket.send_to(data, addr)?;
         Ok(())
     }
 }

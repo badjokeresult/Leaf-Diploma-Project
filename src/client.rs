@@ -1,18 +1,20 @@
 use std::io::Error;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::mpsc::Receiver;
 
 use crate::message::{Message, consts::*};
-use crate::peer::BroadcastUdpPeer;
+use crate::server::BroadcastUdpServer;
 
 pub struct BroadcastUdpClient {
-    peer: BroadcastUdpPeer,
+    socket: UdpSocket,
+    server: BroadcastUdpServer,
     from_peer_receiver: Receiver<(Message, SocketAddr)>,
+    broadcast_addr: SocketAddr,
 }
 
 impl BroadcastUdpClient {
-    pub fn new(num_threads: usize, local_ip: IpAddr, local_broadcast: IpAddr) -> BroadcastUdpClient {
-        let (peer, from_peer_receiver) = BroadcastUdpPeer::new(local_ip, local_broadcast).unwrap();
+    pub fn new(local_ip: IpAddr, local_broadcast: IpAddr) -> BroadcastUdpClient {
+        let (peer, from_peer_receiver) = BroadcastUdpServer::new(local_ip, local_broadcast).unwrap();
         peer.listen();
 
         BroadcastUdpClient {
