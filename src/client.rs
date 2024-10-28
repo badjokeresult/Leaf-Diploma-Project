@@ -13,7 +13,7 @@ pub struct BroadcastUdpClient {
 impl BroadcastUdpClient {
     pub fn new(num_threads: usize, local_ip: IpAddr, local_broadcast: IpAddr) -> BroadcastUdpClient {
         let (peer, from_peer_receiver) = BroadcastUdpPeer::new(local_ip, local_broadcast).unwrap();
-        peer.listen(num_threads);
+        peer.listen();
 
         BroadcastUdpClient {
             peer,
