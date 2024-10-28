@@ -1,7 +1,8 @@
 use std::io::Error;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::{mpsc, mpsc::{Receiver, Sender}};
-use std::thread::{JoinHandle, spawn};
+use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
@@ -35,45 +36,35 @@ impl BroadcastUdpPeer {
         }, to_client_receiver))
     }
 
-    pub fn listen(&self, num_threads: usize) -> Vec<JoinHandle<()>> {
-        let mut handles = vec![];
-
-        for _ in 0..num_threads {
-            let server = self.server.clone();
-            let socket = self.socket.try_clone().unwrap();
-            let sender = self.to_client_sender.clone();
-            let mut buf = [0u8; MAX_DATAGRAM_SIZE];
-
-            let handle = spawn(move || {
-                loop {
-                    match socket.recv_from(&mut buf) {
-                        Ok((s, a)) => {
-                            let message = Message::from(buf[..s].to_vec());
-                            match message {
-                                Message::SendingReq(h) => {
-                                    let answer = server.handle_sending_req(&h).unwrap();
-                                    socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
-                                },
-                                Message::RetrievingReq(h) => {
-                                    let chunks = server.handle_retrieving_req(&h).unwrap();
-                                    for chunk in chunks {
-                                        socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
-                                    }
-                                },
-                                Message::ContentFilled(h, d) => match server.handle_content_filled(&h, &d) {
-                                    Ok(_) => {},
-                                    Err(e) => eprintln!("{}", e.to_string()),
-                                },
-                                _ => sender.send((message, a)).unwrap(),
-                            };
-                        },
-                        Err(e) => panic!("{}", e.to_string()),
-                    };
-                }
-            });
-            handles.push(handle);
-        }
-        handles
+    pub fn listen(&self) -> JoinHandle<()> {
+        thread::spawn(move || {
+            loop {
+                let mut buf = [0u8; MAX_DATAGRAM_SIZE];
+                match self.socket.recv_from(&mut buf) {
+                    Ok((s, a)) => {
+                        let message = Message::from(buf[..s].to_vec());
+                        match message {
+                            Message::SendingReq(h) => {
+                                let answer = self.server.handle_sending_req(&h).unwrap();
+                                self.socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
+                            },
+                            Message::RetrievingReq(h) => {
+                                let chunks = self.server.handle_retrieving_req(&h).unwrap();
+                                for chunk in chunks {
+                                    self.socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
+                                }
+                            },
+                            Message::ContentFilled(h, d) => match self.server.handle_content_filled(&h, &d) {
+                                Ok(_) => {},
+                                Err(e) => eprintln!("{}", e.to_string()),
+                            },
+                            _ => self.to_client_sender.send((message, a)).unwrap(),
+                        };
+                    },
+                    Err(e) => panic!("{}", e.to_string()),
+                };
+            }
+        })
     }
 
     pub fn send_req(&self, data: &[u8]) -> Result<(), Error> {
