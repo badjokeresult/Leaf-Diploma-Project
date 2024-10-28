@@ -36,29 +36,33 @@ impl BroadcastUdpPeer {
         }, to_client_receiver))
     }
 
-    pub fn listen(&'static self) -> JoinHandle<()> {
+    pub fn listen(&self) -> JoinHandle<()> {
+        let socket = self.socket.try_clone().unwrap();
+        let server = self.server.clone();
+        let to_client_sender = self.to_client_sender.clone();
+        let mut buf = [0u8; MAX_DATAGRAM_SIZE];
+
         thread::spawn(move || {
             loop {
-                let mut buf = [0u8; MAX_DATAGRAM_SIZE];
-                match self.socket.recv_from(&mut buf) {
+                match socket.recv_from(&mut buf) {
                     Ok((s, a)) => {
                         let message = Message::from(buf[..s].to_vec());
                         match message {
                             Message::SendingReq(h) => {
-                                let answer = self.server.lock().unwrap().handle_sending_req(&h).unwrap();
-                                self.socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
+                                let answer = server.lock().unwrap().handle_sending_req(&h).unwrap();
+                                socket.send_to(Into::<Vec<_>>::into(answer).as_slice(), a).unwrap();
                             },
                             Message::RetrievingReq(h) => {
-                                let chunks = self.server.lock().unwrap().handle_retrieving_req(&h).unwrap();
+                                let chunks = server.lock().unwrap().handle_retrieving_req(&h).unwrap();
                                 for chunk in chunks {
-                                    self.socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
+                                    socket.send_to(Into::<Vec<_>>::into(chunk).as_slice(), a).unwrap();
                                 }
                             },
-                            Message::ContentFilled(h, d) => match self.server.lock().unwrap().handle_content_filled(&h, &d) {
+                            Message::ContentFilled(h, d) => match server.lock().unwrap().handle_content_filled(&h, &d) {
                                 Ok(_) => {},
                                 Err(e) => eprintln!("{}", e.to_string()),
                             },
-                            _ => self.to_client_sender.send((message, a)).unwrap(),
+                            _ => to_client_sender.send((message, a)).unwrap(),
                         };
                     },
                     Err(e) => panic!("{}", e.to_string()),
