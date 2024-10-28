@@ -2,6 +2,7 @@ use std::io::Error;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::{mpsc, Arc, Mutex, mpsc::{Receiver, Sender}};
 use std::thread::{JoinHandle, spawn};
+use std::time::Duration;
 use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
 use crate::message::Message;
@@ -21,6 +22,8 @@ impl BroadcastUdpPeer {
         let addr = SocketAddr::new(local_ip, 62092);
         let socket = Arc::new(Mutex::new(UdpBuilder::new_v4()?.reuse_address(true)?.reuse_port(true)?.bind(addr)?));
         socket.lock().unwrap().set_broadcast(true)?;
+        socket.lock().unwrap().set_read_timeout(Some(Duration::new(5, 0)))?;
+        socket.lock().unwrap().set_write_timeout(Some(Duration::new(3, 0)))?;
         let server = Arc::new(Mutex::new(BroadcastUdpServer::new()));
         let (to_client_sender, to_client_receiver) = mpsc::channel::<(Message, SocketAddr)>();
 
