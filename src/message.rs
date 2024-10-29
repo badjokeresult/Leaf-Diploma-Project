@@ -5,12 +5,12 @@ use crate::codec::{Codec, DeflateCodec};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum Message {
-    SendingReq(Vec<u8>), // from client, to server
-    SendingAck(Vec<u8>), // from server, to client
-    RetrievingReq(Vec<u8>), // from client, to server
-    RetrievingAck(Vec<u8>, Vec<u8>), // from server, to client
-    ContentFilled(Vec<u8>, Vec<u8>), // from both, to both
-    Empty(Vec<u8>), // sign packet for ending content
+    SendingReq(Vec<u8>),
+    SendingAck(Vec<u8>),
+    RetrievingReq(Vec<u8>),
+    RetrievingAck(Vec<u8>),
+    ContentFilled(Vec<u8>, Vec<u8>),
+    Empty(Vec<u8>),
 }
 
 pub mod consts {
@@ -31,20 +31,16 @@ pub mod consts {
 // }
 
 impl Message {
-    pub fn new_with_data(msg_type_num: u8, hash: &[u8], data: Vec<u8>) -> Vec<Message> {
+    pub fn new_with_data(hash: &[u8], data: &[u8]) -> Vec<Message> {
         let chunks = data.chunks(consts::MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
         let mut messages = vec![];
 
         for chunk in chunks {
-            messages.push(
-                match msg_type_num {
-                    consts::RETRIEVING_ACKNOWLEDGEMENT_TYPE => Message::RetrievingAck(hash.to_vec(), chunk),
-                    consts::CONTENT_FILLED_TYPE => Message::ContentFilled(hash.to_vec(), chunk),
-                    _ => panic!("Invalid message type selected"),
-                }
-            );
+            messages.push(Message::ContentFilled(hash.to_vec(), chunk));
         }
+
+        messages.push(Message::Empty(hash.to_vec()));
 
         messages
     }
@@ -54,6 +50,7 @@ impl Message {
             consts::SENDING_REQUEST_TYPE => Message::SendingReq(hash.to_vec()),
             consts::SENDING_ACKNOWLEDGEMENT_TYPE => Message::SendingAck(hash.to_vec()),
             consts::RETRIEVING_REQUEST_TYPE => Message::RetrievingReq(hash.to_vec()),
+            consts::RETRIEVING_ACKNOWLEDGEMENT_TYPE => Message::RetrievingAck(hash.to_vec()),
             consts::EMPTY_TYPE => Message::Empty(hash.to_vec()),
             _ => panic!("Invalid message type selected"),
         }
