@@ -5,12 +5,12 @@ use crate::codec::{Codec, DeflateCodec};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum Message {
-    SendingReq(Vec<u8>),
-    SendingAck(Vec<u8>),
-    RetrievingReq(Vec<u8>),
-    RetrievingAck(Vec<u8>, Vec<u8>),
-    ContentFilled(Vec<u8>, Vec<u8>),
-    Empty(Vec<u8>),
+    SendingReq(Vec<u8>), // from client, to server
+    SendingAck(Vec<u8>), // from server, to client
+    RetrievingReq(Vec<u8>), // from client, to server
+    RetrievingAck(Vec<u8>, Vec<u8>), // from server, to client
+    ContentFilled(Vec<u8>, Vec<u8>), // from both, to both
+    Empty(Vec<u8>), // sign packet for ending content
 }
 
 pub mod consts {
@@ -20,7 +20,7 @@ pub mod consts {
     pub const RETRIEVING_ACKNOWLEDGEMENT_TYPE: u8 = 3;
     pub const CONTENT_FILLED_TYPE: u8 = 4;
     pub const EMPTY_TYPE: u8 = 5;
-    pub const DEFAULT_MESSAGE_DATA_SIZE: usize = 65243;
+    pub const MAX_MESSAGE_SIZE: usize = 65243;
 }
 
 // #[derive(Serialize, Deserialize, Clone)]
@@ -32,7 +32,7 @@ pub mod consts {
 
 impl Message {
     pub fn new_with_data(msg_type_num: u8, hash: &[u8], data: Vec<u8>) -> Vec<Message> {
-        let chunks = data.chunks(consts::DEFAULT_MESSAGE_DATA_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
+        let chunks = data.chunks(consts::MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
         let mut messages = vec![];
 
@@ -59,14 +59,14 @@ impl Message {
         }
     }
 
-    pub fn as_json(&self) -> Result<String, MessageSerializationError> {
+    fn as_json(&self) -> Result<String, MessageSerializationError> {
         match serde_json::to_string(&self) {
             Ok(j) => Ok(j.to_string()),
             Err(e) => Err(MessageSerializationError(e.to_string())),
         }
     }
 
-    pub fn from_json(message: &str) -> Result<Self, MessageDeserializationError> {
+    fn from_json(message: &str) -> Result<Self, MessageDeserializationError> {
         match serde_json::from_str(message) {
             Ok(m) => Ok(m),
             Err(e) => Err(MessageDeserializationError(e.to_string())),
