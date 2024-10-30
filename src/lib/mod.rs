@@ -16,6 +16,7 @@ pub mod hash;
 pub mod message;
 pub mod shared_secret;
 pub mod server;
+pub mod storage;
 
 pub mod consts {
     pub const WORKING_FOLDER_NAME: &str = ".leaf";
@@ -29,7 +30,7 @@ pub mod consts {
     pub const EMPTY_TYPE: u8 = 5;
     pub const MAX_MESSAGE_SIZE: usize = 65243;
     pub const MAX_DATAGRAM_SIZE: usize = 65507;
-    pub const DEFAULT_STOR_FILE_NAME: &str = "stor.bin";
+    pub const DEFAULT_CHUNKS_STOR_FOLDER: &str = "chunks";
 }
 
 pub async fn init(addr: &str, broadcast_addr: &str, num_threads: usize) -> (Receiver<(Message, SocketAddr)>, BroadcastUdpServer) {
@@ -116,9 +117,4 @@ pub async fn recv_content(hashes: Vec<Option<Vec<u8>>>, server: &BroadcastUdpSer
     let content = sharer.recover_from_chunks(decrypted_chunks).unwrap();
 
     Ok(content)
-}
-
-pub async fn shutdown(server: BroadcastUdpServer) -> Result<(), Error> {
-    server.shutdown().await;
-    Ok(())
 }

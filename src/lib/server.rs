@@ -9,6 +9,7 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::fs;
+
 use rayon::prelude::*;
 
 use net2::UdpBuilder;
@@ -18,22 +19,18 @@ use atomic_refcell::AtomicRefCell;
 
 use crate::message::Message;
 use crate::consts::*;
+use crate::lib::storage::BroadcastUdpServerStorage;
 
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
     socket: Arc<UdpSocket>,
-    storage: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    storage: AtomicRefCell<BroadcastUdpServerStorage>,
     sender: Sender<(Message, SocketAddr)>,
     broadcast_addr: SocketAddr,
-    stor_file_path: PathBuf,
 }
 
 impl BroadcastUdpServer {
     pub async fn new(addr: &str, broadcast_addr: &str, sender: Sender<(Message, SocketAddr)>) -> BroadcastUdpServer {
-        let stor_file_path = dirs::home_dir().unwrap()
-            .join(WORKING_FOLDER_NAME)
-            .join(DEFAULT_STOR_FILE_NAME);
-
         let socket = UdpBuilder::new_v4().unwrap()
             .reuse_address(true).unwrap()
             .reuse_port(true).unwrap()
@@ -44,7 +41,9 @@ impl BroadcastUdpServer {
 
         let socket = Arc::new(UdpSocket::from_std(socket).unwrap());
 
-        let storage = AtomicRefCell::new(Self::restore_storage_from_file(&stor_file_path).await.unwrap_or_else(|_| HashMap::new()));
+        let storage = AtomicRefCell::new(BroadcastUdpServerStorage::new(
+            PathBuf::new().join(WORKING_FOLDER_NAME).join(DEFAULT_CHUNKS_STOR_FOLDER),
+        ));
 
         let broadcast_addr = SocketAddr::from_str(broadcast_addr).unwrap();
 
@@ -53,7 +52,6 @@ impl BroadcastUdpServer {
             storage,
             sender,
             broadcast_addr,
-            stor_file_path,
         }
     }
 
@@ -91,35 +89,22 @@ impl BroadcastUdpServer {
     }
 
     fn handle_retrieving_req(&self, hash: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
-        match self.storage.borrow().get(hash) {
-            Some(c) => {
+        match self.storage.borrow().retrieve(hash) {
+            Ok(c) => {
                 let mut content = vec![Message::RetrievingAck(hash.to_vec(), None)];
                 content.append(&mut Message::new_with_data(RETRIEVING_ACKNOWLEDGEMENT_TYPE, hash, c));
                 Ok(content.par_iter().map(|x| x.clone().into()).collect())
-            },
-            None => Err(Error::last_os_error()),
-        }
-    }
-
-    fn handle_sending_req(&self, hash: &[u8]) -> Result<Vec<u8>, Error> {
-        match self.alloc_mem_for_chunk(hash) {
-            Ok(_) => {
-                let message = Message::SendingAck(hash.to_vec()).into();
-                Ok(message)
             },
             Err(_) => Err(Error::last_os_error()),
         }
     }
 
-    fn alloc_mem_for_chunk(&self, hash: &[u8]) -> Result<(), Error> {
-        match self.storage.borrow_mut().insert(hash.to_vec(), vec![]) {
-            Some(_) => Ok(()),
-            None => Err(Error::last_os_error()),
-        }
+    fn handle_sending_req(&self, hash: &[u8]) -> Result<Vec<u8>, Error> {
+        Ok(Message::SendingAck(hash.to_vec()).into())
     }
 
     fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
-        match self.storage.borrow_mut().get(hash) {
+        match self.storage.borrow_mut().retrieve(hash) {
             Some(d) => Ok(d.clone().append(&mut data.to_vec())),
             None => Err(Error::last_os_error()),
         }
@@ -147,7 +132,7 @@ impl BroadcastUdpServer {
         let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
         self.socket.send_to(&req, self.broadcast_addr).await?;
 
-        if let Some((m, a)) = receiver.recv().await {
+        if let Some((m, _)) = receiver.recv().await {
             if let Message::RetrievingAck(_, _) = m {
                 let mut result = vec![];
                 while let Some((m, _)) = receiver.recv().await {
@@ -159,10 +144,5 @@ impl BroadcastUdpServer {
             }
         }
         Err(Error::last_os_error())
-    }
-
-    pub async fn shutdown(self) {
-        let content = serde_json::to_vec(&self.storage.borrow().clone()).unwrap();
-        fs::write(self.stor_file_path, &content).await.unwrap();
     }
 }
