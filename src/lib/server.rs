@@ -4,7 +4,7 @@ use std::io::Error;
 use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use crate::consts::*;
 
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
-    socket: Arc<UdpSocket>,
+    socket: Arc<Mutex<UdpSocket>>,
     storage: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
     sender: Sender<(Message, SocketAddr)>,
     broadcast_addr: SocketAddr,
@@ -31,13 +31,13 @@ impl BroadcastUdpServer {
             .join(WORKING_FOLDER_NAME)
             .join(DEFAULT_STOR_FILE_NAME);
 
-        let socket = Arc::new(UdpBuilder::new_v4().unwrap()
+        let socket = Arc::new(Mutex::new(UdpBuilder::new_v4().unwrap()
             .reuse_address(true).unwrap()
             .reuse_port(true).unwrap()
-            .bind(addr).unwrap());
-        socket.set_broadcast(true).unwrap();
-        socket.set_write_timeout(Some(Duration::new(5, 0))).unwrap();
-        socket.set_read_timeout(Some(Duration::new(5, 0))).unwrap();
+            .bind(addr).unwrap()));
+        socket.lock().unwrap().set_broadcast(true).unwrap();
+        socket.lock().unwrap().set_write_timeout(Some(Duration::new(5, 0))).unwrap();
+        socket.lock().unwrap().set_read_timeout(Some(Duration::new(5, 0))).unwrap();
 
         let storage = AtomicRefCell::new(Self::restore_storage_from_file(&stor_file_path).unwrap_or_else(|_| HashMap::new()));
 
@@ -61,18 +61,18 @@ impl BroadcastUdpServer {
     pub fn listen(&self) {
         let mut buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
-            let (sz, addr) = self.socket.recv_from(&mut buf).unwrap();
+            let (sz, addr) = self.socket.lock().unwrap().recv_from(&mut buf).unwrap();
             let message = Message::from(buf[..sz].to_vec());
             match message.clone() {
                 Message::RetrievingReq(h) => {
                     let messages = self.handle_retrieving_req(&h).unwrap();
                     for message in messages {
-                        self.socket.send_to(&message, addr).unwrap();
+                        self.socket.lock().unwrap().send_to(&message, addr).unwrap();
                     };
                 },
                 Message::SendingReq(h) => {
                     let message = self.handle_sending_req(&h).unwrap();
-                    self.socket.send_to(&message, addr).unwrap();
+                    self.socket.lock().unwrap().send_to(&message, addr).unwrap();
                 },
                 Message::ContentFilled(h, d) => {
                     self.handle_content_filled(&h, &d).unwrap();
@@ -122,7 +122,7 @@ impl BroadcastUdpServer {
 
     pub fn send_chunk(&self, hash: &[u8], chunk: &[u8], receiver: &Receiver<(Message, SocketAddr)>) -> Result<(), Error> {
         let req: Vec<u8> = Message::SendingReq(hash.to_vec()).into();
-        self.socket.send_to(&req, self.broadcast_addr)?;
+        self.socket.lock().unwrap().send_to(&req, self.broadcast_addr)?;
 
         if let Ok((m, a)) = receiver.recv() {
             if let Message::SendingAck(_) = m {
@@ -130,7 +130,7 @@ impl BroadcastUdpServer {
                     .iter().map(|x| x.clone().into())
                     .collect();
                 for part in content {
-                    self.socket.send_to(&part, a)?;
+                    self.socket.lock().unwrap().send_to(&part, a)?;
                 };
             }
         }
@@ -140,7 +140,7 @@ impl BroadcastUdpServer {
 
     pub fn recv_chunk(&self, hash: &[u8], receiver: &Receiver<(Message, SocketAddr)>) -> Result<Vec<u8>, Error> {
         let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
-        self.socket.send_to(&req, self.broadcast_addr)?;
+        self.socket.lock().unwrap().send_to(&req, self.broadcast_addr)?;
 
         if let Ok((m, a)) = receiver.recv() {
             if let Message::RetrievingAck(_, _) = m {
