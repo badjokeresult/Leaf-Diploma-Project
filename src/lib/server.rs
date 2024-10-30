@@ -19,7 +19,7 @@ use atomic_refcell::AtomicRefCell;
 
 use crate::message::Message;
 use crate::consts::*;
-use crate::lib::storage::BroadcastUdpServerStorage;
+use crate::storage::BroadcastUdpServerStorage;
 
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
