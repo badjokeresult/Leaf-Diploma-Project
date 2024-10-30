@@ -90,13 +90,7 @@ mod init {
     use rand::{Rng, thread_rng};
 
     use super::errors::*;
-    use consts::*;
-
-    pub mod consts {
-        pub const WORKING_FOLDER_NAME: &str = ".leaf";
-        pub const PASSWORD_FILE_NAME: &str = "passwd.txt";
-        pub const GAMMA_FILE_NAME: &str = "gamma.bin";
-    }
+    use crate::consts::*;
 
     pub struct PasswordFilePathWrapper(pub PathBuf);
 
