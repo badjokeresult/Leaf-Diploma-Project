@@ -13,13 +13,13 @@ serde_json = "1.0.132"
 reed-solomon-erasure = "6.0.0"
 rayon = "1.10.0"
 dirs = "5.0.1"
-winapi = "0.3.9"
-libc = "0.2.161"
 net2 = "0.2.39"
-tokio = { version = "1.41.0", features = ["full"] }
 
 [lib]
 name = "leaf"
 path = "src/lib.rs"
 crate-type = ["rlib"]
 
+[[bin]]
+name = "leaf"
+path = "src/main.rs"
