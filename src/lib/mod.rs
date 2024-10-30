@@ -1,7 +1,8 @@
 use std::io::Error;
 use std::net::SocketAddr;
-use std::sync::mpsc::{channel, Receiver};
-use std::thread;
+
+use tokio::sync::mpsc::{channel, Receiver};
+use tokio::task;
 
 use crypto::{Encryptor, KuznechikEncryptor};
 use hash::{Hasher, StreebogHasher};
@@ -32,20 +33,20 @@ pub mod consts {
 }
 
 pub fn init(addr: &str, broadcast_addr: &str, num_threads: usize) -> (Receiver<(Message, SocketAddr)>, BroadcastUdpServer) {
-    let (tx, rx) = channel::<(Message, SocketAddr)>();
+    let (tx, rx) = channel::<(Message, SocketAddr)>(1024);
     let server = BroadcastUdpServer::new(addr, broadcast_addr, tx.clone());
 
     for _ in 0..num_threads {
         let server = server.clone();
-        thread::spawn(move || {
-            server.listen();
+        task::spawn(async move {
+            server.listen().await;
         });
     };
 
     (rx, server)
 }
 
-pub fn send_file(content: Vec<u8>, server: &BroadcastUdpServer, receiver: &Receiver<(Message, SocketAddr)>) -> Result<Vec<Option<Vec<u8>>>, Error> {
+pub async fn send_file(content: Vec<u8>, server: &BroadcastUdpServer, receiver: &mut Receiver<(Message, SocketAddr)>) -> Result<Vec<Option<Vec<u8>>>, Error> {
     let sharer = ReedSolomonSecretSharer::new();
     let chunks = sharer.split_into_chunks(&content).unwrap();
 
@@ -85,17 +86,17 @@ pub fn send_file(content: Vec<u8>, server: &BroadcastUdpServer, receiver: &Recei
                 None => panic!(),
             }
         };
-        server.send_chunk(hash, chunk, receiver)?;
+        server.send_chunk(hash, chunk, receiver).await?;
     }
 
     Ok(hashes)
 }
 
-pub fn recv_content(hashes: Vec<Option<Vec<u8>>>, server: &BroadcastUdpServer, receiver: &Receiver<(Message, SocketAddr)>) -> Result<Vec<u8>, Error> {
+pub async fn recv_content(hashes: Vec<Option<Vec<u8>>>, server: &BroadcastUdpServer, receiver: &mut Receiver<(Message, SocketAddr)>) -> Result<Vec<u8>, Error> {
     let mut chunks = vec![];
     for hash in hashes {
         if let Some(c) = hash {
-            chunks.push(Some(server.recv_chunk(&c, receiver)?));
+            chunks.push(Some(server.recv_chunk(&c, receiver).await?));
         } else {
             chunks.push(None);
         }
@@ -117,7 +118,7 @@ pub fn recv_content(hashes: Vec<Option<Vec<u8>>>, server: &BroadcastUdpServer, r
     Ok(content)
 }
 
-pub fn shutdown(server: BroadcastUdpServer) -> Result<(), Error> {
-    server.shutdown();
+pub async fn shutdown(server: BroadcastUdpServer) -> Result<(), Error> {
+    server.shutdown().await;
     Ok(())
 }

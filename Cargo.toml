@@ -15,6 +15,7 @@ rayon = "1.10.0"
 dirs = "5.0.1"
 net2 = "0.2.39"
 atomic_refcell = "0.1.13"
+tokio = { version = "1.41.0", features = ["full"] }
 
 [lib]
 name = "leaf"
