@@ -34,9 +34,9 @@ impl BroadcastUdpServerStorage {
     }
 
     pub async fn retrieve(&self, hash: &[u8]) -> Result<Vec<u8>, tokio::io::Error> {
-        let files = fs::read_dir(&self.storage_path).await?;
+        let files = std::fs::read_dir(&self.storage_path)?;
         for file in files {
-            let content: FileChunk = serde_json::from_slice(&fs::read(file).await?)?;
+            let content: FileChunk = serde_json::from_slice(&fs::read(file.unwrap().path()).await?)?;
             if content.hash.eq(hash) {
                 return Ok(content.data);
             }
