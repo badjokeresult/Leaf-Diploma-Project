@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use errors::*;
+use crate::consts::*;
 use crate::codec::{Codec, DeflateCodec};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -8,52 +9,28 @@ pub enum Message {
     SendingReq(Vec<u8>),
     SendingAck(Vec<u8>),
     RetrievingReq(Vec<u8>),
-    RetrievingAck(Vec<u8>),
+    RetrievingAck(Vec<u8>, Option<Vec<u8>>),
     ContentFilled(Vec<u8>, Vec<u8>),
     Empty(Vec<u8>),
 }
 
-pub mod consts {
-    pub const SENDING_REQUEST_TYPE: u8 = 0;
-    pub const SENDING_ACKNOWLEDGEMENT_TYPE: u8 = 1;
-    pub const RETRIEVING_REQUEST_TYPE: u8 = 2;
-    pub const RETRIEVING_ACKNOWLEDGEMENT_TYPE: u8 = 3;
-    pub const CONTENT_FILLED_TYPE: u8 = 4;
-    pub const EMPTY_TYPE: u8 = 5;
-    pub const MAX_MESSAGE_SIZE: usize = 65243;
-}
-
-// #[derive(Serialize, Deserialize, Clone)]
-// pub struct Message {
-//     r#type: MessageType,
-//     hash: Vec<u8>,
-//     data: Option<Vec<u8>>,
-// }
-
 impl Message {
-    pub fn new_with_data(hash: &[u8], data: &[u8]) -> Vec<Message> {
-        let chunks = data.chunks(consts::MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
+    pub fn new_with_data(msg_type_num: u8, hash: &[u8], data: &[u8]) -> Vec<Message> {
+        let chunks = data.chunks(MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
         let mut messages = vec![];
 
         for chunk in chunks {
-            messages.push(Message::ContentFilled(hash.to_vec(), chunk));
+            match msg_type_num {
+                RETRIEVING_ACKNOWLEDGEMENT_TYPE => messages.push(Message::RetrievingAck(hash.to_vec(), Some(chunk))),
+                CONTENT_FILLED_TYPE => messages.push(Message::ContentFilled(chunk.to_vec(), chunk)),
+                _ => panic!(),
+            }
         }
 
         messages.push(Message::Empty(hash.to_vec()));
 
         messages
-    }
-
-    pub fn new(msg_type_num: u8, hash: &[u8]) -> Message {
-        match msg_type_num {
-            consts::SENDING_REQUEST_TYPE => Message::SendingReq(hash.to_vec()),
-            consts::SENDING_ACKNOWLEDGEMENT_TYPE => Message::SendingAck(hash.to_vec()),
-            consts::RETRIEVING_REQUEST_TYPE => Message::RetrievingReq(hash.to_vec()),
-            consts::RETRIEVING_ACKNOWLEDGEMENT_TYPE => Message::RetrievingAck(hash.to_vec()),
-            consts::EMPTY_TYPE => Message::Empty(hash.to_vec()),
-            _ => panic!("Invalid message type selected"),
-        }
     }
 
     fn as_json(&self) -> Result<String, MessageSerializationError> {

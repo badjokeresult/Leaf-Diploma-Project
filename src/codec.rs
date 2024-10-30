@@ -27,7 +27,7 @@ impl DeflateCodec {
 impl Codec for DeflateCodec {
     fn encode_message(&self, message: &str) -> Result<Vec<u8>, DataEncodingError> {
         let mut encoder = ZlibEncoder::new(Vec::new(), self.compression);
-        return match encoder.write_all(message.as_bytes()) {
+        match encoder.write_all(message.as_bytes()) {
             Ok(_) => match encoder.finish() {
                 Ok(d) => Ok(d),
                 Err(e) => Err(DataEncodingError(e.to_string())),
