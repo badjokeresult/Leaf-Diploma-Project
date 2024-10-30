@@ -32,9 +32,9 @@ pub mod consts {
     pub const DEFAULT_STOR_FILE_NAME: &str = "stor.bin";
 }
 
-pub fn init(addr: &str, broadcast_addr: &str, num_threads: usize) -> (Receiver<(Message, SocketAddr)>, BroadcastUdpServer) {
+pub async fn init(addr: &str, broadcast_addr: &str, num_threads: usize) -> (Receiver<(Message, SocketAddr)>, BroadcastUdpServer) {
     let (tx, rx) = channel::<(Message, SocketAddr)>(1024);
-    let server = BroadcastUdpServer::new(addr, broadcast_addr, tx.clone());
+    let server = BroadcastUdpServer::new(addr, broadcast_addr, tx.clone()).await;
 
     for _ in 0..num_threads {
         let server = server.clone();

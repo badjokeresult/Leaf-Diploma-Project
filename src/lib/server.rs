@@ -29,7 +29,7 @@ pub struct BroadcastUdpServer {
 }
 
 impl BroadcastUdpServer {
-    pub fn new(addr: &str, broadcast_addr: &str, sender: Sender<(Message, SocketAddr)>) -> BroadcastUdpServer {
+    pub async fn new(addr: &str, broadcast_addr: &str, sender: Sender<(Message, SocketAddr)>) -> BroadcastUdpServer {
         let stor_file_path = dirs::home_dir().unwrap()
             .join(WORKING_FOLDER_NAME)
             .join(DEFAULT_STOR_FILE_NAME);
@@ -44,7 +44,7 @@ impl BroadcastUdpServer {
 
         let socket = Arc::new(UdpSocket::from_std(socket).unwrap());
 
-        let storage = AtomicRefCell::new(Self::restore_storage_from_file(&stor_file_path).unwrap_or_else(|_| HashMap::new()));
+        let storage = AtomicRefCell::new(Self::restore_storage_from_file(&stor_file_path).await.unwrap_or_else(|_| HashMap::new()));
 
         let broadcast_addr = SocketAddr::from_str(broadcast_addr).unwrap();
 
@@ -57,8 +57,8 @@ impl BroadcastUdpServer {
         }
     }
 
-    fn restore_storage_from_file(stor_file_path: &PathBuf) -> Result<HashMap<Vec<u8>, Vec<u8>>, Error> {
-        let content = fs::read(stor_file_path)?;
+    async fn restore_storage_from_file(stor_file_path: &PathBuf) -> Result<HashMap<Vec<u8>, Vec<u8>>, Error> {
+        let content = fs::read(stor_file_path).await?;
         let storage: HashMap<Vec<u8>, Vec<u8>> = serde_json::from_slice(&content)?;
         Ok(storage)
     }
@@ -129,7 +129,7 @@ impl BroadcastUdpServer {
         let req: Vec<u8> = Message::SendingReq(hash.to_vec()).into();
         self.socket.send_to(&req, self.broadcast_addr).await?;
 
-        if let Ok((m, a)) = receiver.recv().await {
+        if let Some((m, a)) = receiver.recv().await {
             if let Message::SendingAck(_) = m {
                 let content: Vec<Vec<u8>> = Message::new_with_data(CONTENT_FILLED_TYPE, hash, chunk)
                     .par_iter().map(|x| x.clone().into())
@@ -147,10 +147,10 @@ impl BroadcastUdpServer {
         let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
         self.socket.send_to(&req, self.broadcast_addr).await?;
 
-        if let Ok((m, a)) = receiver.recv().await {
+        if let Some((m, a)) = receiver.recv().await {
             if let Message::RetrievingAck(_, _) = m {
                 let mut result = vec![];
-                while let Ok((m, _)) = receiver.recv().await {
+                while let Some((m, _)) = receiver.recv().await {
                     if let Message::ContentFilled(_, mut d) = m {
                         result.append(&mut d);
                     }
