@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Error;
@@ -9,8 +8,10 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
-use net2::{UdpBuilder, UdpSocketExt};
+use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
+
+use atomic_refcell::AtomicRefCell;
 
 use crate::message::Message;
 use crate::consts::*;
@@ -18,7 +19,7 @@ use crate::consts::*;
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
     socket: Arc<UdpSocket>,
-    storage: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    storage: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
     sender: Sender<(Message, SocketAddr)>,
     broadcast_addr: SocketAddr,
     stor_file_path: PathBuf,
@@ -38,7 +39,7 @@ impl BroadcastUdpServer {
         socket.set_write_timeout(Some(Duration::new(5, 0))).unwrap();
         socket.set_read_timeout(Some(Duration::new(5, 0))).unwrap();
 
-        let storage = RefCell::new(Self::restore_storage_from_file(&stor_file_path).unwrap_or_else(|_| HashMap::new()));
+        let storage = AtomicRefCell::new(Self::restore_storage_from_file(&stor_file_path).unwrap_or_else(|_| HashMap::new()));
 
         let broadcast_addr = SocketAddr::from_str(broadcast_addr).unwrap();
 
@@ -61,7 +62,7 @@ impl BroadcastUdpServer {
         let mut buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
             let (sz, addr) = self.socket.recv_from(&mut buf).unwrap();
-            let message = Message::from(buf[..sz]);
+            let message = Message::from(buf[..sz].to_vec());
             match message.clone() {
                 Message::RetrievingReq(h) => {
                     let messages = self.handle_retrieving_req(&h).unwrap();
@@ -114,50 +115,45 @@ impl BroadcastUdpServer {
 
     fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
         match self.storage.borrow_mut().get(hash) {
-            Some(mut d) => Ok(d.append(&mut data.to_vec())),
+            Some(d) => Ok(d.clone().append(&mut data.to_vec())),
             None => Err(Error::last_os_error()),
         }
     }
 
     pub fn send_chunk(&self, hash: &[u8], chunk: &[u8], receiver: &Receiver<(Message, SocketAddr)>) -> Result<(), Error> {
-        let req = Message::SendingReq(hash.to_vec()).into();
+        let req: Vec<u8> = Message::SendingReq(hash.to_vec()).into();
         self.socket.send_to(&req, self.broadcast_addr)?;
 
-        let (mut ack, mut addr) = (None, None);
-
-        if let Some((m, a)) = receiver.recv() {
-            ack = Some(m);
-            addr = Some(a);
+        if let Ok((m, a)) = receiver.recv() {
+            if let Message::SendingAck(_) = m {
+                let content: Vec<Vec<u8>> = Message::new_with_data(CONTENT_FILLED_TYPE, hash, chunk)
+                    .iter().map(|x| x.clone().into())
+                    .collect();
+                for part in content {
+                    self.socket.send_to(&part, a)?;
+                };
+            }
         }
-
-        let content = Message::new_with_data(CONTENT_FILLED_TYPE, hash, chunk)
-            .iter().map(|x| x.clone().into())
-            .collect();
-        for part in content {
-            self.socket.send_to(&part, addr.unwrap())?;
-        };
 
         Ok(())
     }
 
     pub fn recv_chunk(&self, hash: &[u8], receiver: &Receiver<(Message, SocketAddr)>) -> Result<Vec<u8>, Error> {
-        let req = Message::RetrievingReq(hash.to_vec()).into();
+        let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
         self.socket.send_to(&req, self.broadcast_addr)?;
 
-        let (mut ack, mut addr) = (None, None);
         if let Ok((m, a)) = receiver.recv() {
-            ack = Some(m);
-            addr = Some(a);
-        }
-
-        let mut result = vec![];
-        while let Ok((m, a)) = receiver.recv() {
-            if let Message::ContentFilled(_, mut d) = m {
-                result.append(&mut d);
+            if let Message::RetrievingAck(_, _) = m {
+                let mut result = vec![];
+                while let Ok((m, _)) = receiver.recv() {
+                    if let Message::ContentFilled(_, mut d) = m {
+                        result.append(&mut d);
+                    }
+                }
+                return Ok(result);
             }
         }
-
-        Ok(result)
+        Err(Error::last_os_error())
     }
 
     pub fn shutdown(self) {
