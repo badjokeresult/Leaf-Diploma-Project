@@ -15,6 +15,4 @@ async fn main() {
     let hashes = send_file(content, &server, &mut rx).await.unwrap();
     let new_content = recv_content(hashes, &server, &mut rx).await.unwrap();
     fs::write("text1.txt", new_content).await.unwrap();
-
-    shutdown(server).await.unwrap();
 }

@@ -68,7 +68,7 @@ impl BroadcastUdpServer {
             let message = Message::from(buf[..sz].to_vec());
             match message.clone() {
                 Message::RetrievingReq(h) => {
-                    let messages = self.handle_retrieving_req(&h).unwrap();
+                    let messages = self.handle_retrieving_req(&h).await.unwrap();
                     for message in messages {
                         self.socket.send_to(&message, addr).await.unwrap();
                     };
@@ -78,7 +78,7 @@ impl BroadcastUdpServer {
                     self.socket.send_to(&message, addr).await.unwrap();
                 },
                 Message::ContentFilled(h, d) => {
-                    self.handle_content_filled(&h, &d).unwrap();
+                    self.handle_content_filled(&h, &d).await.unwrap();
                 },
                 Message::SendingAck(_) | Message::RetrievingAck(_, _) => {
                     self.sender.send((message, addr)).await.unwrap();
@@ -88,11 +88,11 @@ impl BroadcastUdpServer {
         }
     }
 
-    fn handle_retrieving_req(&self, hash: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
-        match self.storage.borrow().retrieve(hash) {
+    async fn handle_retrieving_req(&self, hash: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
+        match self.storage.borrow().retrieve(hash).await {
             Ok(c) => {
                 let mut content = vec![Message::RetrievingAck(hash.to_vec(), None)];
-                content.append(&mut Message::new_with_data(RETRIEVING_ACKNOWLEDGEMENT_TYPE, hash, c));
+                content.append(&mut Message::new_with_data(RETRIEVING_ACKNOWLEDGEMENT_TYPE, hash, &c));
                 Ok(content.par_iter().map(|x| x.clone().into()).collect())
             },
             Err(_) => Err(Error::last_os_error()),
@@ -103,10 +103,10 @@ impl BroadcastUdpServer {
         Ok(Message::SendingAck(hash.to_vec()).into())
     }
 
-    fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
-        match self.storage.borrow_mut().retrieve(hash) {
-            Some(d) => Ok(d.clone().append(&mut data.to_vec())),
-            None => Err(Error::last_os_error()),
+    async fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
+        match self.storage.borrow_mut().retrieve(hash).await {
+            Ok(d) => Ok(d.clone().append(&mut data.to_vec())),
+            Err(_) => Err(Error::last_os_error()),
         }
     }
 
