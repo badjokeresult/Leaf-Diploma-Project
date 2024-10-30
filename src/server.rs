@@ -1,26 +1,35 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs;
 use std::io::Error;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use net2::{UdpBuilder, UdpSocketExt};
 use net2::unix::UnixUdpBuilderExt;
 
 use crate::message::Message;
-use crate::message::consts::*;
-
-const MAX_DATAGRAM_SIZE: usize = 65507;
+use crate::consts::*;
 
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
     socket: Arc<UdpSocket>,
     storage: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    sender: Sender<(Message, SocketAddr)>,
+    broadcast_addr: SocketAddr,
+    stor_file_path: PathBuf,
 }
 
 impl BroadcastUdpServer {
-    pub fn new(addr: &str) -> BroadcastUdpServer {
+    pub fn new(addr: &str, broadcast_addr: &str, sender: Sender<(Message, SocketAddr)>) -> BroadcastUdpServer {
+        let stor_file_path = dirs::home_dir().unwrap()
+            .join(WORKING_FOLDER_NAME)
+            .join(DEFAULT_STOR_FILE_NAME);
+
         let socket = Arc::new(UdpBuilder::new_v4().unwrap()
             .reuse_address(true).unwrap()
             .reuse_port(true).unwrap()
@@ -29,12 +38,23 @@ impl BroadcastUdpServer {
         socket.set_write_timeout(Some(Duration::new(5, 0))).unwrap();
         socket.set_read_timeout(Some(Duration::new(5, 0))).unwrap();
 
-        let storage = RefCell::new(HashMap::new());
+        let storage = RefCell::new(Self::restore_storage_from_file(&stor_file_path).unwrap_or_else(|_| HashMap::new()));
+
+        let broadcast_addr = SocketAddr::from_str(broadcast_addr).unwrap();
 
         BroadcastUdpServer {
             socket,
             storage,
+            sender,
+            broadcast_addr,
+            stor_file_path,
         }
+    }
+
+    fn restore_storage_from_file(stor_file_path: &PathBuf) -> Result<HashMap<Vec<u8>, Vec<u8>>, Error> {
+        let content = fs::read(stor_file_path)?;
+        let storage: HashMap<Vec<u8>, Vec<u8>> = serde_json::from_slice(&content)?;
+        Ok(storage)
     }
 
     pub fn listen(&self) {
@@ -56,6 +76,9 @@ impl BroadcastUdpServer {
                 Message::ContentFilled(h, d) => {
                     self.handle_content_filled(&h, &d).unwrap();
                 },
+                Message::SendingAck(_) | Message::RetrievingAck(_, _) => {
+                    self.sender.send((message, addr)).unwrap();
+                }
                 _ => continue,
             };
         }
@@ -64,8 +87,8 @@ impl BroadcastUdpServer {
     fn handle_retrieving_req(&self, hash: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
         match self.storage.borrow().get(hash) {
             Some(c) => {
-                let mut content = vec![Message::new(RETRIEVING_ACKNOWLEDGEMENT_TYPE, hash)];
-                content.append(&mut Message::new_with_data(CONTENT_FILLED_TYPE, hash, c.clone()));
+                let mut content = vec![Message::RetrievingAck(hash.to_vec(), None)];
+                content.append(&mut Message::new_with_data(RETRIEVING_ACKNOWLEDGEMENT_TYPE, hash, c));
                 Ok(content.iter().map(|x| x.clone().into()).collect())
             },
             None => Err(Error::last_os_error()),
@@ -75,7 +98,7 @@ impl BroadcastUdpServer {
     fn handle_sending_req(&self, hash: &[u8]) -> Result<Vec<u8>, Error> {
         match self.alloc_mem_for_chunk(hash) {
             Ok(_) => {
-                let message = Message::new(SENDING_ACKNOWLEDGEMENT_TYPE, hash).into();
+                let message = Message::SendingAck(hash.to_vec()).into();
                 Ok(message)
             },
             Err(_) => Err(Error::last_os_error()),
@@ -94,5 +117,51 @@ impl BroadcastUdpServer {
             Some(mut d) => Ok(d.append(&mut data.to_vec())),
             None => Err(Error::last_os_error()),
         }
+    }
+
+    pub fn send_chunk(&self, hash: &[u8], chunk: &[u8], receiver: &Receiver<(Message, SocketAddr)>) -> Result<(), Error> {
+        let req = Message::SendingReq(hash.to_vec()).into();
+        self.socket.send_to(&req, self.broadcast_addr)?;
+
+        let (mut ack, mut addr) = (None, None);
+
+        if let Some((m, a)) = receiver.recv() {
+            ack = Some(m);
+            addr = Some(a);
+        }
+
+        let content = Message::new_with_data(CONTENT_FILLED_TYPE, hash, chunk)
+            .iter().map(|x| x.clone().into())
+            .collect();
+        for part in content {
+            self.socket.send_to(&part, addr.unwrap())?;
+        };
+
+        Ok(())
+    }
+
+    pub fn recv_chunk(&self, hash: &[u8], receiver: &Receiver<(Message, SocketAddr)>) -> Result<Vec<u8>, Error> {
+        let req = Message::RetrievingReq(hash.to_vec()).into();
+        self.socket.send_to(&req, self.broadcast_addr)?;
+
+        let (mut ack, mut addr) = (None, None);
+        if let Ok((m, a)) = receiver.recv() {
+            ack = Some(m);
+            addr = Some(a);
+        }
+
+        let mut result = vec![];
+        while let Ok((m, a)) = receiver.recv() {
+            if let Message::ContentFilled(_, mut d) = m {
+                result.append(&mut d);
+            }
+        }
+
+        Ok(result)
+    }
+
+    pub fn shutdown(self) {
+        let content = serde_json::to_vec(&self.storage.borrow().clone()).unwrap();
+        fs::write(self.stor_file_path, &content).unwrap();
     }
 }
