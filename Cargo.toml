@@ -17,12 +17,9 @@ net2 = "0.2.39"
 atomic_refcell = "0.1.13"
 tokio = { version = "1.41.0", features = ["full"] }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
+futures = "0.3.31"
 
 [lib]
 name = "leaf"
-path = "src/lib/mod.rs"
-crate-type = ["rlib"]
-
-[[bin]]
-name = "leaf"
-path = "src/main.rs"
+path = "src/lib.rs"
+crate-type = ["cdylib"]

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use errors::*;
 use crate::consts::*;
 use crate::codec::{Codec, DeflateCodec};
 
@@ -32,26 +31,12 @@ impl Message {
 
         messages
     }
-
-    fn as_json(&self) -> Result<String, MessageSerializationError> {
-        match serde_json::to_string(&self) {
-            Ok(j) => Ok(j.to_string()),
-            Err(e) => Err(MessageSerializationError(e.to_string())),
-        }
-    }
-
-    fn from_json(message: &str) -> Result<Self, MessageDeserializationError> {
-        match serde_json::from_str(message) {
-            Ok(m) => Ok(m),
-            Err(e) => Err(MessageDeserializationError(e.to_string())),
-        }
-    }
 }
 
 impl Into<Vec<u8>> for Message {
     fn into(self) -> Vec<u8> {
         let codec = DeflateCodec::new();
-        let json = self.as_json().unwrap();
+        let json = serde_json::to_string(&self).unwrap();
         codec.encode_message(&json).unwrap()
     }
 }
@@ -60,7 +45,7 @@ impl From<Vec<u8>> for Message {
     fn from(value: Vec<u8>) -> Self {
         let codec = DeflateCodec::new();
         let json = codec.decode_message(&value).unwrap();
-        Message::from_json(&json).unwrap()
+        serde_json::from_str(&json).unwrap()
     }
 }
 

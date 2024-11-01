@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::Error;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -8,7 +7,6 @@ use std::time::Duration;
 
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::fs;
 
 use rayon::prelude::*;
 
@@ -55,12 +53,6 @@ impl BroadcastUdpServer {
         }
     }
 
-    async fn restore_storage_from_file(stor_file_path: &PathBuf) -> Result<HashMap<Vec<u8>, Vec<u8>>, Error> {
-        let content = fs::read(stor_file_path).await?;
-        let storage: HashMap<Vec<u8>, Vec<u8>> = serde_json::from_slice(&content)?;
-        Ok(storage)
-    }
-
     pub async fn listen(&self) {
         let mut buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
@@ -82,8 +74,10 @@ impl BroadcastUdpServer {
                 },
                 Message::SendingAck(_) | Message::RetrievingAck(_, _) => {
                     self.sender.send((message, addr)).await.unwrap();
-                }
-                _ => continue,
+                },
+                Message::Empty(h) => {
+                    self.handle_empty_message(&h).await.unwrap()
+                },
             };
         }
     }
@@ -104,10 +98,13 @@ impl BroadcastUdpServer {
     }
 
     async fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
-        match self.storage.borrow_mut().retrieve(hash).await {
-            Ok(d) => Ok(d.clone().append(&mut data.to_vec())),
-            Err(_) => Err(Error::last_os_error()),
-        }
+        self.storage.borrow_mut().add(hash, data).await?;
+        Ok(())
+    }
+
+    async fn handle_empty_message(&self, hash: &[u8]) -> Result<(), Error> {
+        self.storage.borrow_mut().finalize(hash).await?;
+        Ok(())
     }
 
     pub async fn send_chunk(&self, hash: &[u8], chunk: &[u8], receiver: &mut Receiver<(Message, SocketAddr)>) -> Result<(), Error> {
@@ -132,7 +129,7 @@ impl BroadcastUdpServer {
         let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
         self.socket.send_to(&req, self.broadcast_addr).await?;
 
-        if let Some((m, _)) = receiver.recv().await {
+        while let Some((m, _)) = receiver.recv().await {
             if let Message::RetrievingAck(_, _) = m {
                 let mut result = vec![];
                 while let Some((m, _)) = receiver.recv().await {
@@ -144,5 +141,15 @@ impl BroadcastUdpServer {
             }
         }
         Err(Error::last_os_error())
+    }
+
+    pub async fn shutdown(self) {
+        let storage = self.storage.borrow().clone();
+        storage.shutdown().await;
+        let socket = self.socket.clone();
+        drop(socket);
+        let sender = self.sender.clone();
+        drop(sender);
+        drop(self)
     }
 }
