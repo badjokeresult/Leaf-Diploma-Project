@@ -1,10 +1,14 @@
 use std::net::SocketAddr;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_ulong, c_void, c_ushort};
+use std::sync::Mutex;
 
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Runtime};
 use tokio::task::{spawn, JoinHandle};
+
+use ctor::*;
+use libc_print::libc_println;
 
 mod codec;
 mod crypto;
@@ -35,6 +39,9 @@ pub mod consts {
     pub const DEFAULT_CHUNKS_STOR_FOLDER: &str = "chunks";
 }
 
+const LOCAL_ADDR_STR: *const c_char = "0.0.0.0:62092".as_ptr() as *const c_char;
+const BROADCAST_ADDR_STR: *const c_char = "255.255.255.255:62092".as_ptr() as *const c_char;
+
 #[repr(C)]
 pub struct CVec {
     len: c_ulong,
@@ -42,24 +49,25 @@ pub struct CVec {
     data: *mut c_void,
 }
 
-#[repr(C)]
 pub struct InitializeParams {
-    receiver: *mut c_void,
-    server: *const c_void,
-    handles_vec: CVec,
+    pub receiver: Receiver<(Message, SocketAddr)>,
+    pub server: BroadcastUdpServer,
+    pub tokio_builder: Runtime,
+    pub handles_vec: Vec<JoinHandle<()>>,
 }
 
-#[no_mangle]
-pub extern "C" fn init(addr: *const c_char, broadcast_addr: *const c_char, num_threads: c_ulong) -> InitializeParams {
+#[ctor]
+pub static INIT_PARAMS: Mutex<InitializeParams> = {
     let builder = Builder::new_multi_thread()
         .enable_all()
         .build().unwrap();
 
-    let addr = unsafe { CStr::from_ptr(addr).to_str().unwrap() };
-    let broadcast_addr = unsafe { CStr::from_ptr(broadcast_addr).to_str().unwrap() };
+    let addr = unsafe { CStr::from_ptr(LOCAL_ADDR_STR).to_str().unwrap() };
+    let broadcast_addr = unsafe { CStr::from_ptr(BROADCAST_ADDR_STR).to_str().unwrap() };
     let (tx, rx) = channel::<(Message, SocketAddr)>(1024);
     let server = builder.block_on(async { BroadcastUdpServer::new(addr, broadcast_addr, tx.clone()).await });
 
+    let num_threads = num_cpus::get();
     let mut handles = vec![];
     for _ in 0..num_threads {
         let server = server.clone();
@@ -68,33 +76,33 @@ pub extern "C" fn init(addr: *const c_char, broadcast_addr: *const c_char, num_t
         }) }));
     };
 
-    let rx_clone = Box::new(rx);
-    let rx_ptr = Box::into_raw(rx_clone) as *mut c_void;
-    let server_clone = Box::new(server);
-    let server_ptr = Box::into_raw(server_clone) as *const c_void;
-    let (len, capacity) = (handles.len() as c_ulong, handles.capacity() as c_ulong);
-    let handles_boxed_slice = Vec::into_boxed_slice(handles);
-    let handles_ptr = Box::into_raw(handles_boxed_slice) as *mut c_void;
+    let result = Mutex::new(InitializeParams {
+        receiver: rx,
+        server,
+        tokio_builder: builder,
+        handles_vec: handles,
+    });
 
-    InitializeParams {
-        receiver: rx_ptr,
-        server: server_ptr,
-        handles_vec: CVec {
-            len,
-            capacity,
-            data: handles_ptr,
-        }
-    }
+    print_log("INIT DONE");
+
+    result
+};
+
+#[cfg(not(windows))]
+fn print_log(message: &str) {
+    libc_println!("{}", message);
+}
+
+#[cfg(windows)]
+fn print_log(message: &str) {
+    let mut con = winapi_util::console::Console::stdout().unwrap();
+    println!("{}", message);
+    con.reset().unwrap();
 }
 
 #[no_mangle]
-pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ushort, server: *const c_void, receiver: *mut c_void) -> CVec {
+pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ushort) -> CVec {
     let content: Vec<u8> = unsafe { Vec::from_raw_parts(content as *mut u8, len as usize, capacity as usize) };
-    let server = unsafe { Box::from_raw(server as *mut BroadcastUdpServer) };
-    let mut receiver = unsafe { Box::from_raw(receiver as *mut Receiver<(Message, SocketAddr)>) };
-    let builder = Builder::new_multi_thread()
-        .enable_all()
-        .build().unwrap();
 
     let sharer = ReedSolomonSecretSharer::new();
     let chunks = sharer.split_into_chunks(&content).unwrap();
@@ -103,7 +111,7 @@ pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ush
     let mut encrypted_chunks = vec![];
     for chunk in chunks {
         if let Some(c) = chunk {
-            encrypted_chunks.push(Some(builder.block_on(async { encryptor.encrypt_chunk(&c).await.unwrap() })));
+            encrypted_chunks.push(Some(INIT_PARAMS.lock().unwrap().tokio_builder.block_on(async { encryptor.encrypt_chunk(&c).await.unwrap() })));
         } else {
             encrypted_chunks.push(None);
         }
@@ -135,7 +143,7 @@ pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ush
                 None => panic!(),
             }
         };
-        builder.block_on(async { server.send_chunk(hash, chunk, &mut receiver).await }).unwrap();
+        INIT_PARAMS.lock().unwrap().tokio_builder.block_on(async { INIT_PARAMS.lock().unwrap().server.send_chunk(hash, chunk, &mut INIT_PARAMS.lock().unwrap().receiver).await }).unwrap();
     }
 
     let len = hashes.len();
@@ -150,18 +158,13 @@ pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ush
 }
 
 #[no_mangle]
-pub extern "C" fn recv_content(len: c_ushort, capacity: c_ushort, hashes: *mut c_void, server: *const c_void, receiver: *mut c_void) -> CVec {
-    let server = unsafe { Box::from_raw(server as *mut BroadcastUdpServer) };
-    let mut receiver= unsafe { Box::from_raw(receiver as *mut Receiver<(Message, SocketAddr)>) };
+pub extern "C" fn recv_content(len: c_ushort, capacity: c_ushort, hashes: *mut c_void) -> CVec {
     let hashes: Vec<Option<Vec<u8>>> = unsafe { Vec::from_raw_parts(hashes as *mut Option<Vec<u8>>, len as usize, capacity as usize) };
-    let builder = Builder::new_multi_thread()
-        .enable_all()
-        .build().unwrap();
 
     let mut chunks = vec![];
     for hash in hashes {
         if let Some(c) = hash {
-            chunks.push(Some(builder.block_on(async { server.recv_chunk(&c, &mut receiver).await.unwrap() })));
+            chunks.push(Some(INIT_PARAMS.lock().unwrap().tokio_builder.block_on(async { INIT_PARAMS.lock().unwrap().server.recv_chunk(&c, &mut INIT_PARAMS.lock().unwrap().receiver).await.unwrap() })));
         } else {
             chunks.push(None);
         }
@@ -171,7 +174,7 @@ pub extern "C" fn recv_content(len: c_ushort, capacity: c_ushort, hashes: *mut c
     let mut decrypted_chunks = vec![];
     for chunk in chunks {
         if let Some(c) = chunk {
-            decrypted_chunks.push(Some(builder.block_on(async { decryptor.decrypt_chunk(&c).await.unwrap() })));
+            decrypted_chunks.push(Some(INIT_PARAMS.lock().unwrap().tokio_builder.block_on(async { decryptor.decrypt_chunk(&c).await.unwrap() })));
         } else {
             decrypted_chunks.push(None);
         }
@@ -191,19 +194,12 @@ pub extern "C" fn recv_content(len: c_ushort, capacity: c_ushort, hashes: *mut c
     }
 }
 
-#[no_mangle]
-pub extern "C" fn shutdown(len: c_ulong, capacity: c_ulong, handles: *mut c_void, server: *const c_void, receiver: *mut c_void) {
-    let builder = Builder::new_multi_thread()
-        .enable_all()
-        .build().unwrap();
+#[dtor]
+fn shutdown() {
+    let _: Vec<_> = INIT_PARAMS.lock().unwrap().handles_vec.iter().map(|x| x.abort()).collect();
 
-    let handles = unsafe { Vec::from_raw_parts(handles as *mut JoinHandle<()>, len as usize, capacity as usize) };
-    for handle in handles {
-        handle.abort();
-    }
-    let server = unsafe { Box::from_raw(server as *mut BroadcastUdpServer) };
-    builder.block_on(async { server.shutdown().await; });
+    let server = INIT_PARAMS.lock().unwrap().server.clone();
+    INIT_PARAMS.lock().unwrap().tokio_builder.block_on(async { server.shutdown().await; });
 
-    let receiver = unsafe { Box::from_raw(receiver as *mut Receiver<(Message, SocketAddr)>) };
-    drop(receiver);
+    INIT_PARAMS.lock().unwrap().receiver.close();
 }

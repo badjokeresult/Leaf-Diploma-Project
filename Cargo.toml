@@ -18,6 +18,10 @@ atomic_refcell = "0.1.13"
 tokio = { version = "1.41.0", features = ["full"] }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
 futures = "0.3.31"
+ctor = "0.2.8"
+num_cpus = "1.16.0"
+libc-print = "0.1.23"
+winapi-util = "0.1.9"
 
 [lib]
 name = "leaf"
