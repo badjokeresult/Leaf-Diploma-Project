@@ -8,6 +8,7 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::task::{spawn, JoinHandle};
 
 use ctor::*;
+
 use libc_print::libc_println;
 
 mod codec;
@@ -158,7 +159,7 @@ pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ush
 }
 
 #[no_mangle]
-pub extern "C" fn recv_content(len: c_ushort, capacity: c_ushort, hashes: *mut c_void) -> CVec {
+pub extern "C" fn recv_file(len: c_ushort, capacity: c_ushort, hashes: *mut c_void) -> CVec {
     let hashes: Vec<Option<Vec<u8>>> = unsafe { Vec::from_raw_parts(hashes as *mut Option<Vec<u8>>, len as usize, capacity as usize) };
 
     let mut chunks = vec![];
