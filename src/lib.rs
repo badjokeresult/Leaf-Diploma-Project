@@ -9,8 +9,6 @@ use tokio::task::{spawn, JoinHandle};
 
 use ctor::*;
 
-use libc_print::libc_println;
-
 mod codec;
 mod crypto;
 mod hash;
@@ -38,6 +36,13 @@ pub mod consts {
     pub const MAX_MESSAGE_SIZE: usize = 65243;
     pub const MAX_DATAGRAM_SIZE: usize = 65507;
     pub const DEFAULT_CHUNKS_STOR_FOLDER: &str = "chunks";
+}
+
+#[no_mangle]
+pub extern "C" fn hello(message: *const c_char) {
+    let message_str = unsafe { CStr::from_ptr(message).to_str().unwrap() };
+    println!("{}", message_str);
+    println!("This code is extern!");
 }
 
 const LOCAL_ADDR_STR: *const c_char = "0.0.0.0:62092".as_ptr() as *const c_char;
@@ -84,22 +89,11 @@ pub static INIT_PARAMS: Mutex<InitializeParams> = {
         handles_vec: handles,
     });
 
-    print_log("INIT DONE");
+    let message = b"Hello, world!" as *const u8;
+    println!("{}", unsafe { *message });
 
     result
 };
-
-#[cfg(not(windows))]
-fn print_log(message: &str) {
-    libc_println!("{}", message);
-}
-
-#[cfg(windows)]
-fn print_log(message: &str) {
-    let mut con = winapi_util::console::Console::stdout().unwrap();
-    println!("{}", message);
-    con.reset().unwrap();
-}
 
 #[no_mangle]
 pub extern "C" fn send_file(len: c_ulong, capacity: c_ulong, content: *mut c_ushort) -> CVec {
