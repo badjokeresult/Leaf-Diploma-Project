@@ -1,30 +1,30 @@
 use serde::{Deserialize, Serialize};
 
-use crate::consts::*;
+use consts::*;
 use crate::codec::{Codec, DeflateCodec};
+
+mod consts {
+    pub const MAX_MESSAGE_SIZE: usize = 65243;
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum Message {
     SendingReq(Vec<u8>),
     SendingAck(Vec<u8>),
     RetrievingReq(Vec<u8>),
-    RetrievingAck(Vec<u8>, Option<Vec<u8>>),
-    ContentFilled(Vec<u8>, Vec<u8>),
+    RetrievingAck(Vec<u8>),
+    ContentFilled(Vec<u8>, Vec<u8>, bool),
     Empty(Vec<u8>),
 }
 
 impl Message {
-    pub fn new_with_data(msg_type_num: u8, hash: &[u8], data: &[u8]) -> Vec<Message> {
+    pub fn new_with_data(hash: &[u8], data: &[u8], for_client: bool) -> Vec<Message> {
         let chunks = data.chunks(MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
-        let mut messages = vec![];
+        let mut messages = vec![Message::RetrievingAck(hash.to_vec())];
 
         for chunk in chunks {
-            match msg_type_num {
-                RETRIEVING_ACKNOWLEDGEMENT_TYPE => messages.push(Message::RetrievingAck(hash.to_vec(), Some(chunk))),
-                CONTENT_FILLED_TYPE => messages.push(Message::ContentFilled(chunk.to_vec(), chunk)),
-                _ => panic!(),
-            }
+            messages.push(Message::ContentFilled(chunk.to_vec(), chunk, for_client))
         }
 
         messages.push(Message::Empty(hash.to_vec()));

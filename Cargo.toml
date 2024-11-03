@@ -3,6 +3,14 @@ name = "leaf"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+resolver = "2"
+members = [
+    "leaflibrary",
+    "leafdaemon",
+    "leafclient",
+]
+
 [dependencies]
 flate2 = "1.0.34"
 kuznechik = "0.4.0"
@@ -17,13 +25,20 @@ net2 = "0.2.39"
 atomic_refcell = "0.1.13"
 tokio = { version = "1.41.0", features = ["full"] }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
-futures = "0.3.31"
-ctor = "0.2.8"
+libc = "0.2.161"
 num_cpus = "1.16.0"
-libc-print = "0.1.23"
-winapi-util = "0.1.9"
+clap = { version = "4.5.20", features = ["derive"] }
+daemonize = "0.5.0"
 
 [lib]
-name = "leaf"
-path = "src/lib.rs"
-crate-type = ["cdylib"]
+name = "leaflibrary"
+path = "leaflibrary/src/lib.rs"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "leafdaemon"
+path = "leafdaemon/src/main.rs"
+
+[[bin]]
+name = "leafclient"
+path = "leafclient/src/main.rs"

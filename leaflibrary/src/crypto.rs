@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::str;
 
 use kuznechik::{AlgOfb, KeyStore, Kuznechik};
@@ -16,12 +17,12 @@ pub struct KuznechikEncryptor {
 }
 
 impl KuznechikEncryptor {
-    pub fn new() -> Result<KuznechikEncryptor, InitializeEncryptorError> {
-        let password_file = match PasswordFilePathWrapper::new() {
+    pub fn new(password_file: &PathBuf, gamma_file: &PathBuf) -> Result<KuznechikEncryptor, InitializeEncryptorError> {
+        let password_file = match PasswordFilePathWrapper::new(password_file) {
             Ok(p) => p,
             Err(e) => return Err(InitializeEncryptorError(e.to_string())),
         };
-        let gamma_file = match GammaFilePathWrapper::new() {
+        let gamma_file = match GammaFilePathWrapper::new(gamma_file) {
             Ok(g) => g,
             Err(e) => return Err(InitializeEncryptorError(e.to_string())),
         };
@@ -91,19 +92,13 @@ mod init {
     use rand::{Rng, thread_rng};
 
     use super::errors::*;
-    use crate::consts::*;
 
     pub struct PasswordFilePathWrapper(pub PathBuf);
 
     impl PasswordFilePathWrapper {
-        pub fn new() -> Result<PasswordFilePathWrapper, UserHomeDirResolvingError> {
-            let filepath = match dirs::home_dir() {
-                Some(p) => p.join(WORKING_FOLDER_NAME).join(PASSWORD_FILE_NAME),
-                None => return Err(UserHomeDirResolvingError),
-            };
-
+        pub fn new(password_file: &PathBuf) -> Result<PasswordFilePathWrapper, UserHomeDirResolvingError> {
             Ok(PasswordFilePathWrapper {
-                0: filepath,
+                0: password_file.clone(),
             })
         }
 
@@ -141,14 +136,9 @@ mod init {
     pub struct GammaFilePathWrapper(pub PathBuf);
 
     impl GammaFilePathWrapper {
-        pub fn new() -> Result<GammaFilePathWrapper, UserHomeDirResolvingError> {
-            let filepath = match dirs::home_dir() {
-                Some(p) => p.join(WORKING_FOLDER_NAME).join(GAMMA_FILE_NAME),
-                None => return Err(UserHomeDirResolvingError),
-            };
-
+        pub fn new(gamma_file: &PathBuf) -> Result<GammaFilePathWrapper, UserHomeDirResolvingError> {
             Ok(GammaFilePathWrapper {
-                0: filepath,
+                0: gamma_file.clone(),
             })
         }
 

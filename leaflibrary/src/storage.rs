@@ -26,9 +26,9 @@ pub struct BroadcastUdpServerStorage {
 }
 
 impl BroadcastUdpServerStorage {
-    pub fn new(storage_path: PathBuf) -> Self {
+    pub fn new(storage_path: &PathBuf) -> Self {
         Self {
-            storage_path,
+            storage_path: storage_path.clone(),
             curr_chunks: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -77,7 +77,7 @@ impl BroadcastUdpServerStorage {
         Ok(())
     }
 
-    pub async fn shutdown(self) {
+    pub async fn shutdown(&self) {
         let mut chunks = self.curr_chunks.lock().await;
         for i in 0..chunks.len() {
             if chunks[i].full_flag {
