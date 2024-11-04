@@ -38,7 +38,7 @@ async fn main() {
             for _ in 0..num_threads {
                 let server_clone = server.clone();
                 task::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                     server_clone.listen().await;
                 });
             };
