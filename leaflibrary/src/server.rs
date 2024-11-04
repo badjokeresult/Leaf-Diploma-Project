@@ -80,6 +80,7 @@ impl BroadcastUdpServer {
                     self.handle_content_filled(&h, &d, c, addr).await.unwrap();
                 },
                 Message::SendingAck(_) | Message::RetrievingAck(_) => {
+                    println!("RECEIVED SENDING ACK!w");
                     self.handle_ack(message, addr).await.unwrap();
                 },
                 Message::Empty(h) => {
@@ -112,6 +113,7 @@ impl BroadcastUdpServer {
 
     async fn handle_ack(&self, message: Message, addr: SocketAddr) -> Result<(), Error> {
         self.client_queue.borrow_mut().push_back((message, addr));
+        println!("LEN OF QUEUE : {}", self.client_queue.borrow().len());
         Ok(())
     }
 
