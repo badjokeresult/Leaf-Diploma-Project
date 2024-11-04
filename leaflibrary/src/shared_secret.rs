@@ -118,7 +118,6 @@ impl SecretSharer for ReedSolomonSecretSharer {
         }
 
         encoder.encode(&mut blocks).unwrap();
-        println!("{:?}", blocks);
         let chunks = blocks.par_iter().cloned().map(Some).collect::<Vec<_>>();
 
         let chunks = match self.recovering_level {

@@ -80,7 +80,7 @@ impl BroadcastUdpServer {
                     self.handle_content_filled(&h, &d, c, addr).await.unwrap();
                 },
                 Message::SendingAck(_) | Message::RetrievingAck(_) => {
-                    println!("RECEIVED SENDING ACK!w");
+                    println!("RECEIVED SENDING ACK!");
                     self.handle_ack(message, addr).await.unwrap();
                 },
                 Message::Empty(h) => {
