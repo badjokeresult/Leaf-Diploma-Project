@@ -41,7 +41,7 @@ impl Into<Vec<u8>> for MetaFileInfo {
 #[tokio::main]
 async fn main() {
     let recovering_level = 1;
-    let content = fs::read("~/snmp.txt").await.unwrap();
+    let content = fs::read("./snmp.txt").await.unwrap();
 
     let sharer = match ReedSolomonSecretSharer::new(recovering_level) {
         Ok(s) => s,
