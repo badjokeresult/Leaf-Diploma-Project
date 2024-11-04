@@ -59,8 +59,8 @@ async fn main() {
     };
 
     let (password_file, gamma_file) = (
-        dirs::home_dir().unwrap().join("password.txt"),
-        dirs::home_dir().unwrap().join("gamma.bin"));
+        dirs::home_dir().unwrap().join(".leaf").join("password.txt"),
+        dirs::home_dir().unwrap().join(".leaf").join("gamma.bin"));
     let encryptor = match KuznechikEncryptor::new(&password_file, &gamma_file) {
         Ok(e) => e,
         Err(e) => {
@@ -105,7 +105,7 @@ async fn main() {
     let mut data_hashes = vec![];
     let mut recovery_hashes = vec![];
     let server = BroadcastUdpServer::new(
-        &dirs::home_dir().unwrap().join("chunks"),
+        &dirs::home_dir().unwrap().join(".leaf").join("chunks"),
     ).await;
     for chunk in encrypted_data {
         if let Some(c) = chunk {
