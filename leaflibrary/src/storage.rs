@@ -34,12 +34,6 @@ impl BroadcastUdpServerStorage {
     }
 
     pub async fn add(&mut self, hash: &[u8], data: &[u8]) -> Result<(), tokio::io::Error> {
-        for chunk in self.curr_chunks.lock().await.iter_mut() {
-            if chunk.hash.eq(hash) && !chunk.full_flag {
-                chunk.data.append(&mut data.to_vec());
-                return Ok(());
-            }
-        }
         self.curr_chunks.lock().await.push(FileChunk::new(hash.to_vec(), data.to_vec()));
         Ok(())
     }
@@ -58,16 +52,15 @@ impl BroadcastUdpServerStorage {
     }
 
     pub async fn finalize(&mut self, hash: &[u8]) -> Result<(), tokio::io::Error> {
+        println!("LEN OF CURR CHUNKS : {}", self.curr_chunks.lock().await.len());
         let mut chunks = self.curr_chunks.lock().await;
         for i in 0..chunks.len() {
             if chunks[i].hash.eq(hash) && !chunks[i].full_flag {
                 chunks[i].full_flag = true;
                 self.save_chunk(&chunks[i]).await?;
-                chunks.remove(i);
-                return Ok(());
             }
         }
-        Err(tokio::io::Error::last_os_error())
+        Ok(())
     }
 
     async fn save_chunk(&self, chunk: &FileChunk) -> Result<(), tokio::io::Error> {

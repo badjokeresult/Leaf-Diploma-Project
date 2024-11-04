@@ -72,15 +72,18 @@ impl BroadcastUdpServer {
                     self.handle_retrieving_req(&h, addr).await.unwrap();
                 },
                 Message::SendingReq(h) => {
+                    println!("RECEIVED SENDING REQ!");
                     self.handle_sending_req(&h, addr).await.unwrap();
                 },
                 Message::ContentFilled(h, d, c) => {
+                    println!("RECEIVED CONTENT FILLED!");
                     self.handle_content_filled(&h, &d, c, addr).await.unwrap();
                 },
                 Message::SendingAck(_) | Message::RetrievingAck(_) => {
                     self.handle_ack(message, addr).await.unwrap();
                 },
                 Message::Empty(h) => {
+                    println!("RECEIVED EMPTY!");
                     self.handle_empty_message(&h).await.unwrap()
                 },
             };
