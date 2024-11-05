@@ -16,5 +16,8 @@ pub use server::BroadcastUdpServer;
 pub mod shared_secret;
 pub use shared_secret::{SecretSharer, ReedSolomonSecretSharer};
 
+mod client;
+pub use client::BroadcastUdpClient;
+
 pub mod storage;
 pub use storage::BroadcastUdpServerStorage;

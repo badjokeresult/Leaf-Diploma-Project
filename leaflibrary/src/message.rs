@@ -13,21 +13,18 @@ pub enum Message {
     SendingAck(Vec<u8>),
     RetrievingReq(Vec<u8>),
     RetrievingAck(Vec<u8>),
-    ContentFilled(Vec<u8>, Vec<u8>, bool),
-    Empty(Vec<u8>),
+    ContentFilled(Vec<u8>, Vec<u8>),
 }
 
 impl Message {
-    pub fn new_with_data(hash: &[u8], data: &[u8], for_client: bool) -> Vec<Message> {
+    pub fn new_with_data(hash: &[u8], data: &[u8]) -> Vec<Message> {
         let chunks = data.chunks(MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
         let mut messages = vec![Message::RetrievingAck(hash.to_vec())];
 
         for chunk in chunks {
-            messages.push(Message::ContentFilled(chunk.to_vec(), chunk, for_client))
+            messages.push(Message::ContentFilled(chunk.to_vec(), chunk))
         }
-
-        messages.push(Message::Empty(hash.to_vec()));
 
         messages
     }
