@@ -9,8 +9,6 @@ members = [
     "leaflibrary",
     "leafdaemon",
     "leafclient",
-    "testclient",
-    "testserver",
 ]
 
 [dependencies]
@@ -44,11 +42,3 @@ path = "leafdaemon/src/main.rs"
 [[bin]]
 name = "leafclient"
 path = "leafclient/src/main.rs"
-
-[[bin]]
-name = "testserver"
-path = "testserver/src/main.rs"
-
-[[bin]]
-name = "testclient"
-path = "testclient/src/main.rs"

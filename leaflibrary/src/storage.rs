@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 use std::path::PathBuf;
 
 use tokio::fs;
@@ -15,7 +16,7 @@ impl BroadcastUdpServerStorage {
     pub async fn new(storage_path: &PathBuf) -> Self {
         Self {
             storage_path: storage_path.clone(),
-            database: Self::from_file(storage_path).await.unwrap_or_else(|e| HashMap::new()),
+            database: Self::from_file(storage_path).await.unwrap_or_else(|_| HashMap::new()),
         }
     }
 

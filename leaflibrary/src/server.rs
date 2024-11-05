@@ -1,8 +1,6 @@
-use std::collections::VecDeque;
 use std::io::Error;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,20 +8,19 @@ use tokio::net::{TcpListener, UdpSocket};
 
 use rayon::prelude::*;
 
-use net2::{TcpListenerExt, UdpBuilder};
-use net2::unix::{UnixTcpBuilderExt, UnixUdpBuilderExt};
+use net2::UdpBuilder;
+use net2::unix::UnixUdpBuilderExt;
 
 use atomic_refcell::AtomicRefCell;
+
 use tokio::io::AsyncReadExt;
 
-use crate::message::Message;
-
 use consts::*;
+use crate::message::Message;
 use crate::storage::BroadcastUdpServerStorage;
 
 mod consts {
     pub const LOCAL_ADDR: &str = "0.0.0.0:62092";
-    pub const BROADCAST_ADDR: &str = "255.255.255.255:62092";
     pub const MAX_DATAGRAM_SIZE: usize = 65507;
 }
 
@@ -32,8 +29,6 @@ pub struct BroadcastUdpServer {
     udp_socket: Arc<UdpSocket>,
     tcp_listener: Arc<TcpListener>,
     storage: AtomicRefCell<BroadcastUdpServerStorage>,
-    client_queue: AtomicRefCell<VecDeque<(Message, SocketAddr)>>,
-    broadcast_addr: SocketAddr,
 }
 
 impl BroadcastUdpServer {
@@ -52,24 +47,18 @@ impl BroadcastUdpServer {
 
         let storage = AtomicRefCell::new(BroadcastUdpServerStorage::new(
             chunks_folder,
-        ));
-
-        let client_queue = AtomicRefCell::new(VecDeque::new());
-
-        let broadcast_addr = SocketAddr::from_str(BROADCAST_ADDR).unwrap();
+        ).await);
 
         BroadcastUdpServer {
             udp_socket,
             tcp_listener,
             storage,
-            client_queue,
-            broadcast_addr,
         }
     }
 
     pub async fn listen_udp(&self) {
-        let mut buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
+            let mut buf = [0u8; MAX_DATAGRAM_SIZE];
             let (sz, addr) = self.udp_socket.recv_from(&mut buf).await.unwrap();
             let message = Message::from(buf[..sz].to_vec());
             match message.clone() {
@@ -85,8 +74,8 @@ impl BroadcastUdpServer {
     }
 
     pub async fn listen_tcp(&self) {
-        let mut buf = [0u8; MAX_DATAGRAM_SIZE];
         loop {
+            let mut buf = [0u8; MAX_DATAGRAM_SIZE];
             let (mut socket, _) = self.tcp_listener.accept().await.unwrap();
             let sz = socket.read(&mut buf).await.unwrap();
             let message = Message::from(buf[..sz].to_vec());
@@ -113,11 +102,6 @@ impl BroadcastUdpServer {
     async fn handle_sending_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), Error> {
         let message: Vec<u8> = Message::SendingAck(hash.to_vec()).into();
         self.udp_socket.send_to(&message, addr).await?;
-        Ok(())
-    }
-
-    async fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
-        self.storage.borrow_mut().add(hash, data).await?;
         Ok(())
     }
 

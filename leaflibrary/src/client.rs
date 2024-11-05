@@ -44,7 +44,7 @@ impl BroadcastUdpClient {
         self.socket.send_to(&req, self.broadcast_addr).await?;
 
         let mut buf = [0u8; 65507];
-        while let Some((sz, addr)) = self.socket.recv_from(&mut buf).await {
+        while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
             let ack = Message::from(buf[..sz].to_vec());
             if let Message::SendingAck(h) = ack {
                 if h.eq(&hash) {
@@ -68,7 +68,7 @@ impl BroadcastUdpClient {
 
         let mut result = vec![];
         let mut buf = [0u8; 65507];
-        while let Some((sz, addr)) = self.socket.recv_from(&mut buf).await {
+        while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
             let ack = Message::from(buf[..sz].to_vec());
             if let Message::RetrievingAck(h) = ack {
                 if h.eq(&hash) {
@@ -78,7 +78,7 @@ impl BroadcastUdpClient {
                     if peer_addr.eq(&addr) {
                         let sz = socket.read(&mut buf).await.unwrap();
                         let content_msg = Message::from(buf[..sz].to_vec());
-                        if let Message::ContentFilled(h, mut d) = content_msg {
+                        if let Message::ContentFilled(_, mut d) = content_msg {
                             result.append(&mut d);
                         };
                     };

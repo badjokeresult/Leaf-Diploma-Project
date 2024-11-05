@@ -1,245 +1,144 @@
+mod args;
+mod meta;
+
 use std::path::PathBuf;
 use std::process;
 
 use tokio::fs;
 use clap::Parser;
-
-use leaflibrary::{BroadcastUdpServer, Encryptor, Hasher, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer, StreebogHasher};
+use leaflibrary::{BroadcastUdpClient, Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
 use meta::MetaFileInfo;
 
-mod args;
-mod meta;
+use args::Args;
 
 #[tokio::main]
 async fn main() {
-    let args = args::Args::parse();
+    let args = Args::parse();
 
-    let file_content = fs::read(&args.file).await.unwrap();
     match args.action.as_str() {
-        "send" => handle_send_command(file_content, args.recovering_level, &args.file).await,
-        "recv" => handle_recv_command(file_content, args.recovering_level, &args.file).await,
-        _ => {
-            eprintln!("Unknown command was provided, exit...");
-            process::exit(1);
-        }
-    };
+        "send" => handle_send(&args.file, args.recovering_level).await,
+        "recv" => handle_recv(&args.file, args.recovering_level).await,
+        _ => {},
+    }
 }
 
-async fn handle_send_command(content: Vec<u8>, recovering_level: usize, path: &PathBuf) {
-    let sharer = match ReedSolomonSecretSharer::new(recovering_level) {
-        Ok(s) => s,
+async fn handle_send(path: &PathBuf, recovering_level: usize) {
+    let content = match fs::read(path).await {
+        Ok(content) => content,
         Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(2);
-        },
-    };
-    let chunks = match sharer.split_into_chunks(&content) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(3);
+            eprintln!("failed to read file: {}", e);
+            process::exit(1);
         },
     };
 
-    let (password_file, gamma_file) = (
-        dirs::home_dir().unwrap().join("password.txt"),
-        dirs::home_dir().unwrap().join("gamma.bin"));
-    let encryptor = match KuznechikEncryptor::new(&password_file, &gamma_file) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(4);
-        },
-    };
-    let mut encrypted_data = vec![];
-    let mut encrypted_rec = vec![];
+    let sharer = ReedSolomonSecretSharer::new(recovering_level).unwrap();
+    let chunks = sharer.split_into_chunks(&content).unwrap();
+
+    let (mut enc_data, mut enc_rec) = (vec![], vec![]);
+    let encryptor = KuznechikEncryptor::new(
+        &dirs::home_dir().unwrap().join(".leaf").join("password.txt"),
+        &dirs::home_dir().unwrap().join(".leaf").join("gamma.bin"),
+    ).unwrap();
     for chunk in &chunks[0] {
         if let Some(c) = chunk {
-            encrypted_data.push(Some(match encryptor.encrypt_chunk(&c).await {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
-                    process::exit(5);
-                },
-            }));
+            enc_data.push(Some(encryptor.encrypt_chunk(c).await.unwrap()));
         } else {
-            encrypted_data.push(None);
+            enc_data.push(None);
         }
-    };
+    }
     for chunk in &chunks[1..] {
-        let mut enc_vec = vec![];
+        let mut crypt = vec![];
         for inner in chunk {
             if let Some(c) = inner {
-                enc_vec.push(Some(match encryptor.encrypt_chunk(c).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("{}", e.to_string());
-                        process::exit(6);
-                    },
-                }));
+                crypt.push(Some(encryptor.encrypt_chunk(c).await.unwrap()));
             } else {
-                enc_vec.push(None);
+                crypt.push(None);
             }
         }
-        encrypted_rec.push(enc_vec);
+        enc_rec.append(&mut crypt);
     }
 
-    let hasher = StreebogHasher::new();
-    let mut data_hashes = vec![];
-    let mut recovery_hashes = vec![];
-    let server = BroadcastUdpServer::new(
-        &dirs::home_dir().unwrap().join("chunks"),
-    ).await;
-    for chunk in encrypted_data {
+    let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await;
+    let (mut data_hashes, mut rec_hashes) = (vec![], vec![]);
+    for chunk in &chunks[0] {
         if let Some(c) = chunk {
-            let hash = hasher.calc_hash_for_chunk(&c);
-            match server.send_chunk(&hash, &c).await {
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
-                    process::exit(7);
-                },
-            };
-            data_hashes.push(Some(hash));
+            data_hashes.push(Some(client.send_data(c).await.unwrap()));
         } else {
             data_hashes.push(None);
         }
     }
-    for chunk in encrypted_rec {
+    for chunk in &chunks[1..] {
         let mut hashes = vec![];
         for inner in chunk {
             if let Some(c) = inner {
-                let hash = hasher.calc_hash_for_chunk(&c);
-                match server.send_chunk(&hash, &c).await {
-                    Ok(_) => {},
-                    Err(e) => {
-                        eprintln!("{}", e.to_string());
-                        process::exit(8);
-                    },
-                };
-                hashes.push(Some(hash));
+                hashes.push(Some(client.send_data(c).await.unwrap()));
             } else {
                 hashes.push(None);
             }
         }
-        recovery_hashes.push(hashes);
-    };
+        rec_hashes.push(hashes);
+    }
 
-    let meta = MetaFileInfo::new(recovering_level, data_hashes, recovery_hashes);
-
-    match fs::write(path, <MetaFileInfo as Into<Vec<u8>>>::into(meta)).await {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(9);
-        },
-    };
+    let meta = MetaFileInfo::new(recovering_level, data_hashes, rec_hashes);
+    fs::write(path, serde_json::to_vec(&meta).unwrap()).await.unwrap();
 }
 
-async fn handle_recv_command(content: Vec<u8>, recovering_level: usize, path: &PathBuf) {
-    let meta = MetaFileInfo::from(content);
+async fn handle_recv(path: &PathBuf, recovering_level: usize) {
+    let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await;
+    let meta: MetaFileInfo = match fs::read(path).await {
+        Ok(m) => serde_json::from_slice(&m).unwrap(),
+        Err(_) => process::exit(3),
+    };
     let (data_hashes, rec_hashes) = meta.deconstruct();
-
-    let server = BroadcastUdpServer::new(
-        &dirs::home_dir().unwrap().join("chunks"),
-    ).await;
     let (mut enc_data, mut enc_rec) = (vec![], vec![]);
-    for chunk in &data_hashes {
-        if let Some(c) = chunk {
-            let data = match server.recv_chunk(c).await {
-                Ok(d) => d,
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
-                    process::exit(10);
-                },
-            };
-            enc_data.push(Some(data));
+    for hash in data_hashes {
+        if let Some(h) = hash {
+            enc_data.push(Some(client.recv_data(&h).await.unwrap()));
         } else {
             enc_data.push(None);
         }
-    };
-    if enc_data.len() != data_hashes.len() {
-        for hash in rec_hashes {
-            let mut rec = vec![];
-            for inner in hash {
-                if let Some(h) = inner {
-                    let data = match server.recv_chunk(&h).await {
-                        Ok(d) => d,
-                        Err(e) => {
-                            eprintln!("{}", e.to_string());
-                            process::exit(11);
-                        },
-                    };
-                    rec.push(Some(data));
-                } else {
-                    rec.push(None);
-                }
-            }
-            enc_rec.push(rec);
-        };
-    };
-
-    let (password_file, gamma_file) = (
-        dirs::home_dir().unwrap().join("password.txt"),
-        dirs::home_dir().unwrap().join("gamma.bin"),
-    );
-    let decryptor = match KuznechikEncryptor::new(&password_file, &gamma_file) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(12);
-        },
-    };
-    let mut chunks = vec![];
-    for chunk in enc_data {
-        if let Some(c) = chunk {
-            chunks.push(Some(match decryptor.decrypt_chunk(&c).await {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("{}", e.to_string());
-                    process::exit(13);
-                },
-            }));
-        } else {
-            chunks.push(None);
-        }
-    };
-    for part in enc_rec {
-        for inner in part {
-            if let Some(c) = inner {
-                chunks.push(Some(match decryptor.decrypt_chunk(&c).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!("{}", e.to_string());
-                        process::exit(14);
-                    },
-                }));
+    }
+    for hash in rec_hashes {
+        let mut chunks = vec![];
+        for inner in hash {
+            if let Some(h) = inner {
+                chunks.push(Some(client.recv_data(&h).await.unwrap()));
             } else {
                 chunks.push(None);
             }
         }
-    };
+        enc_rec.push(chunks);
+    }
 
-    let sharer = match ReedSolomonSecretSharer::new(recovering_level) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(15);
-        },
-    };
-    let content = match sharer.recover_from_chunks(chunks) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(16);
-        },
-    };
+    let (mut data, mut rec) = (vec![], vec![]);
+    let decryptor = KuznechikEncryptor::new(
+        &dirs::home_dir().unwrap().join(".leaf").join("password.txt"),
+        &dirs::home_dir().unwrap().join(".leaf").join("gamma.bin"),
+    ).unwrap();
+    for chunk in enc_data {
+        if let Some(c) = chunk {
+            data.push(Some(decryptor.decrypt_chunk(&c).await.unwrap()));
+        } else {
+            data.push(None);
+        }
+    }
+    for chunk in enc_rec {
+        let mut chunks = vec![];
+        for inner in chunk {
+            if let Some(c) = inner {
+                chunks.push(Some(decryptor.decrypt_chunk(&c).await.unwrap()));
+            } else {
+                chunks.push(None);
+            }
+        }
+        rec.push(chunks);
+    }
+    for chunk in &mut rec {
+        data.append(chunk);
+    }
 
-    match fs::write(path, &content).await {
-        Ok(_) => {},
-        Err(e) => {
-            eprintln!("{}", e.to_string());
-            process::exit(17);
-        },
-    };
+    let sharer = ReedSolomonSecretSharer::new(recovering_level).unwrap();
+    let content = sharer.recover_from_chunks(data).unwrap();
+
+    fs::write(path, &content).await.unwrap();
 }

@@ -35,13 +35,20 @@ async fn main() {
                 &working_dir.join("chunks"),
             ).await;
             let num_threads = num_cpus::get();
-            for _ in 0..num_threads {
+            for _ in 0..num_threads / 2 {
                 let server_clone = server.clone();
                 task::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(5)).await;
-                    server_clone.listen().await;
+                    server_clone.listen_udp().await;
                 });
             };
+            for _ in 0..num_threads / 2 {
+                let server_clone = server.clone();
+                task::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    server_clone.listen_tcp().await;
+                });
+            }
         },
         Err(e) => {
             eprintln!("{}", e.to_string());

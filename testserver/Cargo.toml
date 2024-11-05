@@ -1,7 +1,0 @@
-[package]
-name = "testserver"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-leaflibrary = { path = "../leaflibrary" }
