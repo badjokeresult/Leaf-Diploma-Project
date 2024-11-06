@@ -6,7 +6,7 @@ use tokio::task;
 use tokio::fs::File;
 use daemonize::Daemonize;
 
-use leaflibrary::BroadcastUdpServer;
+use leaflibrary::{BroadcastUdpServer, UdpServer};
 
 #[tokio::main]
 async fn main() {
@@ -14,13 +14,13 @@ async fn main() {
 
     let server = BroadcastUdpServer::new(
         &working_dir.join("chunks"),
-    ).await;
+    ).await.unwrap();
 
     let num_threads = num_cpus::get();
     for _ in 0..num_threads {
         let server_clone = server.clone();
         task::spawn(async move {
-            server_clone.listen().await;
+            server_clone.listen().await.unwrap();
         });
     }
 

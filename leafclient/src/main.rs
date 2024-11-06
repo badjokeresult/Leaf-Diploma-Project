@@ -6,7 +6,7 @@ use std::process;
 
 use tokio::fs;
 use clap::Parser;
-use leaflibrary::{BroadcastUdpClient, Encryptor, KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
+use leaflibrary::*;
 use meta::MetaFileInfo;
 
 use args::Args;
@@ -33,6 +33,7 @@ async fn handle_send(path: &PathBuf, recovering_level: usize) {
 
     let sharer = ReedSolomonSecretSharer::new(recovering_level).unwrap();
     let chunks = sharer.split_into_chunks(&content).unwrap();
+    println!("1 : {}\n2 : {}", chunks[0].len(), chunks[1].len());
 
     let (mut enc_data, mut enc_rec) = (vec![], vec![]);
     let encryptor = KuznechikEncryptor::new(
@@ -58,11 +59,11 @@ async fn handle_send(path: &PathBuf, recovering_level: usize) {
         enc_rec.push(crypt);
     }
 
-    let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await;
+    let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await.unwrap();
     let (mut data_hashes, mut rec_hashes) = (vec![], vec![]);
     for chunk in &enc_data {
         if let Some(c) = chunk {
-            data_hashes.push(Some(client.send_data(c).await.unwrap()));
+            data_hashes.push(Some(client.send_chunk(c).await.unwrap()));
         } else {
             data_hashes.push(None);
         }
@@ -71,7 +72,7 @@ async fn handle_send(path: &PathBuf, recovering_level: usize) {
         let mut hashes = vec![];
         for inner in chunk {
             if let Some(c) = inner {
-                hashes.push(Some(client.send_data(c).await.unwrap()));
+                hashes.push(Some(client.send_chunk(c).await.unwrap()));
             } else {
                 hashes.push(None);
             }
@@ -79,12 +80,13 @@ async fn handle_send(path: &PathBuf, recovering_level: usize) {
         rec_hashes.push(hashes);
     }
 
+    println!("ENC DATA : {}\nREC DATA : {}", data_hashes.len(), rec_hashes.len());
     let meta = MetaFileInfo::new(recovering_level, data_hashes, rec_hashes);
     fs::write(path, serde_json::to_vec(&meta).unwrap()).await.unwrap();
 }
 
 async fn handle_recv(path: &PathBuf, recovering_level: usize) {
-    let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await;
+    let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await.unwrap();
     let meta: MetaFileInfo = match fs::read(path).await {
         Ok(m) => serde_json::from_slice(&m).unwrap(),
         Err(_) => process::exit(3),
@@ -93,7 +95,7 @@ async fn handle_recv(path: &PathBuf, recovering_level: usize) {
     let (mut enc_data, mut enc_rec) = (vec![], vec![]);
     for hash in data_hashes {
         if let Some(h) = hash {
-            enc_data.push(Some(client.recv_data(&h).await.unwrap()));
+            enc_data.push(Some(client.recv_chunk(&h).await.unwrap()));
         } else {
             enc_data.push(None);
         }
@@ -102,7 +104,7 @@ async fn handle_recv(path: &PathBuf, recovering_level: usize) {
         let mut chunks = vec![];
         for inner in hash {
             if let Some(h) = inner {
-                chunks.push(Some(client.recv_data(&h).await.unwrap()));
+                chunks.push(Some(client.recv_chunk(&h).await.unwrap()));
             } else {
                 chunks.push(None);
             }

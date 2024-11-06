@@ -22,9 +22,9 @@ mod consts {
 #[repr(usize)]
 #[derive(Clone, Copy)]
 pub enum RecoveringLevel {
-    Unknown = 0,
-    Minimal = 1,
-    Maximal = 2,
+    Unknown = 2,
+    Minimal = 0,
+    Maximal = 1,
 }
 
 impl From<usize> for RecoveringLevel {
@@ -40,9 +40,9 @@ impl From<usize> for RecoveringLevel {
 impl Into<usize> for RecoveringLevel {
     fn into(self) -> usize {
         match self {
-            RecoveringLevel::Maximal => 2,
-            RecoveringLevel::Minimal => 1,
-            RecoveringLevel::Unknown => 0,
+            RecoveringLevel::Maximal => 1,
+            RecoveringLevel::Minimal => 0,
+            RecoveringLevel::Unknown => 2,
         }
     }
 }

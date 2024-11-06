@@ -4,8 +4,16 @@ use std::time::Duration;
 
 use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
+
 use tokio::net::UdpSocket;
+
+use errors::*;
 use crate::{Hasher, Message, StreebogHasher};
+
+pub trait UdpClient {
+    async fn send_chunk(&self, data: &[u8]) -> Result<Vec<u8>, SendingChunkError>;
+    async fn recv_chunk(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingChunkError>;
+}
 
 pub struct BroadcastUdpClient {
     socket: UdpSocket,
@@ -14,58 +22,91 @@ pub struct BroadcastUdpClient {
 }
 
 impl BroadcastUdpClient {
-    pub async fn new(local_addr: &str, broadcast_addr: &str) -> BroadcastUdpClient {
-        let socket = UdpBuilder::new_v4().unwrap()
-            .reuse_address(true).unwrap()
-            .reuse_port(true).unwrap()
-            .bind(local_addr).unwrap();
-        socket.set_broadcast(true).unwrap();
-        socket.set_write_timeout(Some(Duration::new(5, 0))).unwrap();
-        socket.set_read_timeout(Some(Duration::new(5, 0))).unwrap();
+    pub async fn new(local_addr: &str, broadcast_addr: &str) -> Result<BroadcastUdpClient, ClientInitError> {
+        let udp_socket = match UdpBuilder::new_v4() {
+            Ok(b) => match b.reuse_address(true) {
+                Ok(b) => match b.reuse_port(true) {
+                    Ok(b) => match b.bind(local_addr) {
+                        Ok(s) => s,
+                        Err(e) => return Err(ClientInitError(e.to_string())),
+                    },
+                    Err(e) => return Err(ClientInitError(e.to_string())),
+                },
+                Err(e) => return Err(ClientInitError(e.to_string())),
+            },
+            Err(e) => return Err(ClientInitError(e.to_string())),
+        };
 
-        let socket = UdpSocket::from_std(socket).unwrap();
+        match udp_socket.set_broadcast(true) {
+            Ok(_) => {},
+            Err(e) => return Err(ClientInitError(e.to_string())),
+        };
+        match udp_socket.set_write_timeout(Some(Duration::new(5, 0))) {
+            Ok(_) => {},
+            Err(e) => return Err(ClientInitError(e.to_string())),
+        };
+        match udp_socket.set_read_timeout(Some(Duration::new(5, 0))) {
+            Ok(_) => {},
+            Err(e) => return Err(ClientInitError(e.to_string())),
+        };
+
+        let socket = match UdpSocket::from_std(udp_socket) {
+            Ok(s) => s,
+            Err(e) => return Err(ClientInitError(e.to_string())),
+        };
 
         let hasher = StreebogHasher::new();
 
-        let broadcast_addr = SocketAddr::from_str(broadcast_addr).unwrap();
+        let broadcast_addr = match SocketAddr::from_str(broadcast_addr) {
+            Ok(a) => a,
+            Err(e) => return Err(ClientInitError(e.to_string())),
+        };
 
-        BroadcastUdpClient {
+        Ok(BroadcastUdpClient {
             socket,
             hasher,
             broadcast_addr,
-        }
+        })
     }
+}
 
-    pub async fn send_data(&self, data: &[u8]) -> Result<Vec<u8>, tokio::io::Error> {
+impl UdpClient for BroadcastUdpClient {
+    async fn send_chunk(&self, data: &[u8]) -> Result<Vec<u8>, SendingChunkError> {
         let hash = self.hasher.calc_hash_for_chunk(data);
 
         let req: Vec<u8> = Message::SendingReq(hash.clone()).into();
-        self.socket.send_to(&req, self.broadcast_addr).await?;
-        println!("SENT SENDING REQ TO {}", self.broadcast_addr);
+        match self.socket.send_to(&req, self.broadcast_addr).await {
+            Ok(_) => {},
+            Err(e) => return Err(SendingChunkError(e.to_string())),
+        };
 
         let mut buf = [0u8; 65507];
         if let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
             let ack = Message::from(buf[..sz].to_vec());
             if let Message::SendingAck(h) = ack {
                 if h.eq(&hash) {
-                    println!("RECEIVED SENDING ACK FROM {}", addr);
                     let content: Vec<Vec<u8>> = Message::new_with_data(&hash, data)
                         .iter().map(|x| x.clone().into()).collect::<Vec<Vec<_>>>();
-                    println!("LEN OF CONTENT MESSAGES : {}", content.len());
                     for msg in &content {
-                        self.socket.send_to(&msg, addr).await?;
+                        match self.socket.send_to(&msg, addr).await {
+                            Ok(_) => {},
+                            Err(e) => return Err(SendingChunkError(e.to_string())),
+                        };
                     }
-                    println!("SENDING CONTENT FINISHED");
+                    return Ok(hash);
                 };
             };
         };
 
-        Err(tokio::io::Error::last_os_error())
+        Err(SendingChunkError(String::from("No acknowledgement received")))
     }
 
-    pub async fn recv_data(&self, hash: &[u8]) -> Result<Vec<u8>, tokio::io::Error> {
+    async fn recv_chunk(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingChunkError> {
         let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
-        self.socket.send_to(&req, self.broadcast_addr).await?;
+        match self.socket.send_to(&req, self.broadcast_addr).await {
+            Ok(_) => {},
+            Err(e) => return Err(ReceivingChunkError(e.to_string())),
+        };
 
         let mut result = vec![];
         let mut buf = [0u8; 65507];
@@ -74,19 +115,57 @@ impl BroadcastUdpClient {
             if let Message::RetrievingAck(h) = ack {
                 if h.eq(&hash) {
                     buf.fill(0u8);
-                    let (peer_sz, peer_addr) = self.socket.recv_from(&mut buf).await?;
-                    let content = Message::from(buf[..peer_sz].to_vec());
-                    if peer_addr.eq(&addr) {
-                        if let Message::ContentFilled(h, mut d) = content {
-                            if h.eq(&hash) {
-                                result.append(&mut d);
-                            }
-                        }
-                    }
+                    while let Ok((peer_sz, peer_addr)) = self.socket.recv_from(&mut buf).await {
+                        let content = Message::from(buf[..peer_sz].to_vec());
+                        if peer_addr.eq(&addr) {
+                            if let Message::ContentFilled(h, mut d) = content {
+                                if h.eq(&hash) {
+                                    result.append(&mut d);
+                                };
+                            } else if let Message::Empty(h) = content {
+                                if h.eq(hash) {
+                                    return Ok(result);
+                                };
+                            };
+                        };
+                        buf.fill(0u8);
+                    };
                 };
             };
         };
 
         Ok(result)
+    }
+}
+
+mod errors {
+    use std::fmt;
+    use std::fmt::Formatter;
+
+    #[derive(Debug, Clone)]
+    pub struct SendingChunkError(pub String);
+
+    impl fmt::Display for SendingChunkError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error sending chunk into domain: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ReceivingChunkError(pub String);
+
+    impl fmt::Display for ReceivingChunkError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error receiving from domain: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ClientInitError(pub String);
+
+    impl fmt::Display for ClientInitError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error init client: {}", self.0)
+        }
     }
 }

@@ -11,13 +11,13 @@ pub mod message;
 pub use message::Message;
 
 pub mod server;
-pub use server::BroadcastUdpServer;
+pub use server::{BroadcastUdpServer, UdpServer};
 
 pub mod shared_secret;
 pub use shared_secret::{SecretSharer, ReedSolomonSecretSharer};
 
 mod client;
-pub use client::BroadcastUdpClient;
+pub use client::{BroadcastUdpClient, UdpClient};
 
 pub mod storage;
-pub use storage::BroadcastUdpServerStorage;
+pub use storage::{BroadcastUdpServerStorage, UdpStorage};

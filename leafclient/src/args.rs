@@ -11,6 +11,6 @@ pub struct Args {
     #[arg(short, long)]
     pub action: String,
 
-    #[arg(short, long, default_value = "1")]
+    #[arg(short, long, default_value = "0")]
     pub recovering_level: usize,
 }
