@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::net::{TcpListener, UdpSocket};
+use tokio::net::UdpSocket   ;
 
 use rayon::prelude::*;
 
@@ -27,7 +27,6 @@ mod consts {
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
     udp_socket: Arc<UdpSocket>,
-    tcp_listener: Arc<TcpListener>,
     storage: AtomicRefCell<BroadcastUdpServerStorage>,
 }
 
@@ -43,20 +42,17 @@ impl BroadcastUdpServer {
 
         let udp_socket = Arc::new(UdpSocket::from_std(udp_socket).unwrap());
 
-        let tcp_listener = Arc::new(TcpListener::bind(LOCAL_ADDR).await.unwrap());
-
         let storage = AtomicRefCell::new(BroadcastUdpServerStorage::new(
             chunks_folder,
         ).await);
 
         BroadcastUdpServer {
             udp_socket,
-            tcp_listener,
             storage,
         }
     }
 
-    pub async fn listen_udp(&self) {
+    pub async fn listen(&self) {
         loop {
             let mut buf = [0u8; MAX_DATAGRAM_SIZE];
             let (sz, addr) = self.udp_socket.recv_from(&mut buf).await.unwrap();
@@ -66,22 +62,15 @@ impl BroadcastUdpServer {
                     self.handle_retrieving_req(&h, addr).await.unwrap();
                 },
                 Message::SendingReq(h) => {
+                    println!("RECEIVED SENDING REQ FROM {}", addr);
                     self.handle_sending_req(&h, addr).await.unwrap();
                 },
+                Message::ContentFilled(h, d) => {
+                    println!("RECEIVED CONTENT FILLED FROM {}", addr);
+                    self.handle_content_filled(&h, &d).await.unwrap();
+                }
                 _ => eprintln!("Invalid message received"),
             };
-        }
-    }
-
-    pub async fn listen_tcp(&self) {
-        loop {
-            let mut buf = [0u8; MAX_DATAGRAM_SIZE];
-            let (mut socket, _) = self.tcp_listener.accept().await.unwrap();
-            let sz = socket.read(&mut buf).await.unwrap();
-            let message = Message::from(buf[..sz].to_vec());
-            if let Message::ContentFilled(h, d) = message {
-                self.storage.borrow_mut().add(&h, &d).await.unwrap();
-            }
         }
     }
 
@@ -93,6 +82,8 @@ impl BroadcastUdpServer {
             },
             Err(_) => return Err(Error::last_os_error()),
         };
+        let ack: Vec<u8> = Message::RetrievingAck(hash.to_vec()).into();
+        self.udp_socket.send_to(&ack, addr).await?;
         for message in &messages {
             self.udp_socket.send_to(message, addr).await?;
         }
@@ -102,6 +93,12 @@ impl BroadcastUdpServer {
     async fn handle_sending_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), Error> {
         let message: Vec<u8> = Message::SendingAck(hash.to_vec()).into();
         self.udp_socket.send_to(&message, addr).await?;
+        println!("SENT SENDING ACK TO {}", addr);
+        Ok(())
+    }
+
+    async fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), Error> {
+        self.storage.borrow_mut().add(hash, data).await?;
         Ok(())
     }
 

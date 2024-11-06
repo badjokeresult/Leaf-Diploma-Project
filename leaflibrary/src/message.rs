@@ -20,10 +20,10 @@ impl Message {
     pub fn new_with_data(hash: &[u8], data: &[u8]) -> Vec<Message> {
         let chunks = data.chunks(MAX_MESSAGE_SIZE).map(|x| x.to_vec()).collect::<Vec<_>>();
 
-        let mut messages = vec![Message::RetrievingAck(hash.to_vec())];
+        let mut messages = vec![];
 
         for chunk in chunks {
-            messages.push(Message::ContentFilled(chunk.to_vec(), chunk))
+            messages.push(Message::ContentFilled(hash.to_vec(), chunk));
         }
 
         messages

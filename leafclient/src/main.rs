@@ -55,19 +55,19 @@ async fn handle_send(path: &PathBuf, recovering_level: usize) {
                 crypt.push(None);
             }
         }
-        enc_rec.append(&mut crypt);
+        enc_rec.push(crypt);
     }
 
     let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await;
     let (mut data_hashes, mut rec_hashes) = (vec![], vec![]);
-    for chunk in &chunks[0] {
+    for chunk in &enc_data {
         if let Some(c) = chunk {
             data_hashes.push(Some(client.send_data(c).await.unwrap()));
         } else {
             data_hashes.push(None);
         }
     }
-    for chunk in &chunks[1..] {
+    for chunk in &enc_rec[1..] {
         let mut hashes = vec![];
         for inner in chunk {
             if let Some(c) = inner {

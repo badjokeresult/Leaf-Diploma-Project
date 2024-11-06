@@ -4,8 +4,7 @@ use std::time::Duration;
 
 use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::net::UdpSocket;
 use crate::{Hasher, Message, StreebogHasher};
 
 pub struct BroadcastUdpClient {
@@ -42,19 +41,21 @@ impl BroadcastUdpClient {
 
         let req: Vec<u8> = Message::SendingReq(hash.clone()).into();
         self.socket.send_to(&req, self.broadcast_addr).await?;
+        println!("SENT SENDING REQ TO {}", self.broadcast_addr);
 
         let mut buf = [0u8; 65507];
-        while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
+        if let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
             let ack = Message::from(buf[..sz].to_vec());
             if let Message::SendingAck(h) = ack {
                 if h.eq(&hash) {
-                    let content = Message::new_with_data(&hash, data);
-                    let mut conn = TcpStream::connect(addr).await?;
-                    for m in content {
-                        let msg_vec: Vec<u8> = m.into();
-                        conn.write(&msg_vec).await?;
-                    };
-                    return Ok(hash);
+                    println!("RECEIVED SENDING ACK FROM {}", addr);
+                    let content: Vec<Vec<u8>> = Message::new_with_data(&hash, data)
+                        .iter().map(|x| x.clone().into()).collect::<Vec<Vec<_>>>();
+                    println!("LEN OF CONTENT MESSAGES : {}", content.len());
+                    for msg in &content {
+                        self.socket.send_to(&msg, addr).await?;
+                    }
+                    println!("SENDING CONTENT FINISHED");
                 };
             };
         };
@@ -68,20 +69,20 @@ impl BroadcastUdpClient {
 
         let mut result = vec![];
         let mut buf = [0u8; 65507];
-        while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
+        if let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
             let ack = Message::from(buf[..sz].to_vec());
             if let Message::RetrievingAck(h) = ack {
                 if h.eq(&hash) {
                     buf.fill(0u8);
-                    let stream = TcpListener::bind("0.0.0.0:62092").await?;
-                    let (mut socket, peer_addr) = stream.accept().await.unwrap();
+                    let (peer_sz, peer_addr) = self.socket.recv_from(&mut buf).await?;
+                    let content = Message::from(buf[..peer_sz].to_vec());
                     if peer_addr.eq(&addr) {
-                        let sz = socket.read(&mut buf).await.unwrap();
-                        let content_msg = Message::from(buf[..sz].to_vec());
-                        if let Message::ContentFilled(_, mut d) = content_msg {
-                            result.append(&mut d);
-                        };
-                    };
+                        if let Message::ContentFilled(h, mut d) = content {
+                            if h.eq(&hash) {
+                                result.append(&mut d);
+                            }
+                        }
+                    }
                 };
             };
         };

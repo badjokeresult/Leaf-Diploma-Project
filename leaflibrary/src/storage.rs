@@ -44,7 +44,7 @@ impl BroadcastUdpServerStorage {
         let filename = Uuid::new_v4().to_string() + ".dat";
         let filepath = self.storage_path.join(filename).to_str().unwrap().to_string();
         match fs::write(&filepath, data).await {
-            Ok(_) => self.database.insert(hash.to_vec(), filepath).unwrap(),
+            Ok(_) => self.database.insert(hash.to_vec(), filepath),
             Err(e) => return Err(tokio::io::Error::new(tokio::io::ErrorKind::Other, format!("{:?}", e))),
         };
         Ok(())
@@ -52,7 +52,7 @@ impl BroadcastUdpServerStorage {
 
     pub async fn retrieve(&self, hash: &[u8]) -> Result<Vec<u8>, tokio::io::Error> {
         for (h, s) in &self.database {
-            if hash.eq(h) {
+            if h.eq(hash) {
                 return Ok(fs::read(s).await?);
             }
         }
