@@ -8,7 +8,8 @@ use net2::unix::UnixUdpBuilderExt;
 use tokio::net::UdpSocket;
 
 use errors::*;
-use crate::{Hasher, Message, StreebogHasher};
+use crate::hash::StreebogHasher;
+use crate::{Hasher, Message};
 
 pub trait UdpClient {
     async fn send_chunk(&self, data: &[u8]) -> Result<Vec<u8>, SendingChunkError>;
@@ -97,7 +98,6 @@ impl UdpClient for BroadcastUdpClient {
                 };
             };
         };
-
         Err(SendingChunkError(String::from("No acknowledgement received")))
     }
 
@@ -134,6 +134,9 @@ impl UdpClient for BroadcastUdpClient {
             };
         };
 
+        if result.len() == 0 {
+            return Err(ReceivingChunkError(String::from("Data cannot be received")));
+        }
         Ok(result)
     }
 }
