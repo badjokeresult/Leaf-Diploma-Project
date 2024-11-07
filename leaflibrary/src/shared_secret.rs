@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
@@ -19,47 +19,11 @@ mod consts {
     pub const ALIGNMENT: usize = 64;
 }
 
-#[repr(usize)]
-#[derive(Clone, Copy)]
-pub enum RecoveringLevel {
-    Unknown = 2,
-    Minimal = 0,
-    Maximal = 1,
-}
-
-impl From<usize> for RecoveringLevel {
-    fn from(value: usize) -> Self {
-        match value {
-            0 => RecoveringLevel::Minimal,
-            1 => RecoveringLevel::Maximal,
-            _ => RecoveringLevel::Unknown,
-        }
-    }
-}
-
-impl Into<usize> for RecoveringLevel {
-    fn into(self) -> usize {
-        match self {
-            RecoveringLevel::Maximal => 1,
-            RecoveringLevel::Minimal => 0,
-            RecoveringLevel::Unknown => 2,
-        }
-    }
-}
-
-pub struct ReedSolomonSecretSharer {
-    recovering_level: RecoveringLevel,
-}
+pub struct ReedSolomonSecretSharer;
 
 impl ReedSolomonSecretSharer {
-    pub fn new(recovering_level: usize) -> Result<ReedSolomonSecretSharer, Error> {
-        let recovering_level = RecoveringLevel::from(recovering_level);
-        if let RecoveringLevel::Unknown = recovering_level {
-            return Err(Error::new(ErrorKind::InvalidData, "Invalid"));
-        }
-        Ok(ReedSolomonSecretSharer {
-            recovering_level,
-        })
+    pub fn new() -> Result<ReedSolomonSecretSharer, Error> {
+        Ok(ReedSolomonSecretSharer{})
     }
 
     fn calc_block_size(file_size: usize) -> usize {
@@ -83,15 +47,10 @@ impl SecretSharer for ReedSolomonSecretSharer {
             buf[i] = secret[i];
         }
 
-        let amount_of_recovers = match self.recovering_level {
-            RecoveringLevel::Minimal => amount_of_blocks,
-            RecoveringLevel::Maximal => amount_of_blocks * 2,
-            RecoveringLevel::Unknown => return Err(DataSplittingError("Unknown".to_string())),
-        };
+        let amount_of_recovers = amount_of_blocks;
         let encoder: ReedSolomon<galois_8::Field> = match ReedSolomon::new(amount_of_blocks, amount_of_recovers) {
             Ok(e) => e,
             Err(e) => {
-                eprintln!("ERROR INIT REED_SOLOMON");
                 return Err(DataSplittingError(e.to_string()));
             },
         };
@@ -120,19 +79,9 @@ impl SecretSharer for ReedSolomonSecretSharer {
         encoder.encode(&mut blocks).unwrap();
         let chunks = blocks.par_iter().cloned().map(Some).collect::<Vec<_>>();
 
-        let chunks = match self.recovering_level {
-            RecoveringLevel::Minimal => {
-                let (data, rec) = chunks.split_at(chunks.len() / 2);
-                vec![data.to_vec(), rec.to_vec()]
-            },
-            RecoveringLevel::Maximal => {
-                let (data, rec) = chunks.split_at(chunks.len() / 3);
-                vec![data.to_vec(), rec.to_vec()]
-            },
-            RecoveringLevel::Unknown => return Err(DataSplittingError("Error".to_string())),
-        };
+        let (data, rec) = chunks.split_at(amount_of_blocks);
 
-        Ok(chunks)
+        Ok(vec![data.to_vec(), rec.to_vec()])
     }
 
     fn recover_from_chunks(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError> {
@@ -143,11 +92,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
                 None
             }
         }).collect::<Vec<_>>();
-        let (data_len, recovery_len) = match self.recovering_level {
-            RecoveringLevel::Minimal => (full_data.len() / 2, full_data.len() / 2),
-            RecoveringLevel::Maximal => (full_data.len() / 3, (full_data.len() / 3) * 2),
-            RecoveringLevel::Unknown => return Err(DataRecoveringError("Error!".to_string())),
-        };
+        let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2);
 
         let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(data_len, recovery_len).unwrap();
         decoder.reconstruct_data(&mut full_data).unwrap();
