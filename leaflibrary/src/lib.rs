@@ -1,6 +1,3 @@
-pub mod codec;
-pub use codec::{Codec, DeflateCodec};
-
 pub mod crypto;
 pub use crypto::{Encryptor, KuznechikEncryptor, errors};
 

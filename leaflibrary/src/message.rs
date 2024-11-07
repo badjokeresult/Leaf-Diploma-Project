@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 
 use consts::*;
-use crate::codec::{Codec, DeflateCodec};
 
 mod consts {
     pub const MAX_MESSAGE_SIZE: usize = 65243;
@@ -33,16 +32,12 @@ impl Message {
 
 impl Into<Vec<u8>> for Message {
     fn into(self) -> Vec<u8> {
-        let codec = DeflateCodec::new();
-        let json = serde_json::to_string(&self).unwrap();
-        codec.encode_message(&json).unwrap()
+        bincode::serialize(&self).unwrap()
     }
 }
 
 impl From<Vec<u8>> for Message {
     fn from(value: Vec<u8>) -> Self {
-        let codec = DeflateCodec::new();
-        let json = codec.decode_message(&value).unwrap();
-        serde_json::from_str(&json).unwrap()
+        bincode::deserialize(&value).unwrap()
     }
 }
