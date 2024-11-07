@@ -16,14 +16,19 @@ use args::Args;
 async fn main() {
     let args = Args::parse();
 
+    let encryptor = Box::new(KuznechikEncryptor::new(
+        &dirs::home_dir().unwrap().join(".leaf").join("password.txt"),
+        &dirs::home_dir().unwrap().join(".leaf").join("gamma.bin"),
+    ).unwrap());
+
     match args.action.as_str() {
-        "send" => handle_send(&args.file).await,
-        "recv" => handle_recv(&args.file).await,
+        "send" => handle_send(&args.file, &encryptor).await,
+        "recv" => handle_recv(&args.file, &encryptor).await,
         _ => {},
     }
 }
 
-async fn handle_send(path: &PathBuf) {
+async fn handle_send(path: &PathBuf, encryptor: &Box<dyn Encryptor>) {
     let content = match fs::read(path).await {
         Ok(content) => content,
         Err(e) => {
@@ -35,10 +40,7 @@ async fn handle_send(path: &PathBuf) {
     let sharer = ReedSolomonSecretSharer::new().unwrap();
     let chunks = sharer.split_into_chunks(&content).unwrap();
 
-    let encryptor = KuznechikEncryptor::new(
-        &dirs::home_dir().unwrap().join(".leaf").join("password.txt"),
-        &dirs::home_dir().unwrap().join(".leaf").join("gamma.bin"),
-    ).unwrap();
+
 
     let encrypted_chunks = chunks.par_iter().map(|x| x.par_iter().map(|y| async {
         if let Some(z) = y {
@@ -61,7 +63,7 @@ async fn handle_send(path: &PathBuf) {
     fs::write(path, serde_json::to_vec(&meta).unwrap()).await.unwrap();
 }
 
-async fn handle_recv(path: &PathBuf) {
+async fn handle_recv(path: &PathBuf, decryptor: &Box<dyn Encryptor>) {
     let client = BroadcastUdpClient::new("0.0.0.0:0", "255.255.255.255:62092").await.unwrap();
     let (data, rec) = match fs::read(path).await {
         Ok(m) => MetaFileInfo::from(m).deconstruct(),
@@ -87,11 +89,6 @@ async fn handle_recv(path: &PathBuf) {
     }
 
     data_chunks.append(&mut rec_chunks);
-
-    let decryptor = KuznechikEncryptor::new(
-        &dirs::home_dir().unwrap().join(".leaf").join("password.txt"),
-        &dirs::home_dir().unwrap().join(".leaf").join("gamma.bin"),
-    ).unwrap();
 
     let data = data_chunks.par_iter().map(|x| async {
         if let Some(y) = x {
