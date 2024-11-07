@@ -6,19 +6,19 @@ use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
 
 use tokio::net::UdpSocket;
-
+use tokio::sync::Mutex;
 use errors::*;
 use crate::hash::StreebogHasher;
 use crate::{Hasher, Message};
 
 pub trait UdpClient {
-    async fn send_chunk(&self, data: &[u8]) -> Result<Vec<u8>, SendingChunkError>;
-    async fn recv_chunk(&self, hash: &[u8]) -> Result<Vec<u8>, ReceivingChunkError>;
+    fn send_chunk(&self, data: &[u8]) -> impl std::future::Future<Output = Result<Vec<u8>, SendingChunkError>> + Send;
+    fn recv_chunk(&self, hash: &[u8]) -> impl std::future::Future<Output = Result<Vec<u8>, ReceivingChunkError>> + Send;
 }
 
 pub struct BroadcastUdpClient {
     socket: UdpSocket,
-    hasher: StreebogHasher,
+    hasher: Mutex<StreebogHasher>,
     broadcast_addr: SocketAddr,
 }
 
@@ -56,7 +56,7 @@ impl BroadcastUdpClient {
             Err(e) => return Err(ClientInitError(e.to_string())),
         };
 
-        let hasher = StreebogHasher::new();
+        let hasher = Mutex::new(StreebogHasher::new());
 
         let broadcast_addr = match SocketAddr::from_str(broadcast_addr) {
             Ok(a) => a,
@@ -73,7 +73,7 @@ impl BroadcastUdpClient {
 
 impl UdpClient for BroadcastUdpClient {
     async fn send_chunk(&self, data: &[u8]) -> Result<Vec<u8>, SendingChunkError> {
-        let hash = self.hasher.calc_hash_for_chunk(data);
+        let hash = self.hasher.lock().await.calc_hash_for_chunk(data);
 
         let req: Vec<u8> = Message::SendingReq(hash.clone()).into();
         match self.socket.send_to(&req, self.broadcast_addr).await {

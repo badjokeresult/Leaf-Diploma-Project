@@ -12,8 +12,6 @@ use net2::unix::UnixUdpBuilderExt;
 
 use atomic_refcell::AtomicRefCell;
 
-use tokio::io::AsyncReadExt;
-
 use consts::*;
 use crate::message::Message;
 use crate::server::errors::{HandlingMessageError, ServerInitError, ShutdownError};
