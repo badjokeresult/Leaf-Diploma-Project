@@ -10,7 +10,7 @@ use leaflibrary::*;
 use meta::MetaFileInfo;
 
 use futures::stream::{StreamExt, TryStreamExt};
-
+use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator};
 use args::Args;
 
 #[tokio::main]
@@ -62,7 +62,10 @@ async fn handle_send(path: &PathBuf, encryptor: &KuznechikEncryptor) {
                 } else {
                     None
                 }
-            })))
+            }))
+            .buffered(num_cpus::get())
+            .try_collect())
+        .try_collect().await?;
 
     let meta = MetaFileInfo::new(hashes[0].clone(), hashes[1].clone());
     fs::write(path, serde_json::to_vec(&meta).unwrap()).await.unwrap();
@@ -75,13 +78,14 @@ async fn handle_recv(path: &PathBuf, decryptor: &KuznechikEncryptor) {
         Err(_) => process::exit(3),
     };
 
-    let mut data_chunks: Vec<Option<Vec<u8>>> = data.iter().map(|x| async {
+    let mut data_chunks: Vec<Option<Vec<u8>>> = futures::stream::iter(data).map(|x| tokio::spawn(async move {
         if let Some(y) = x {
-            Some(client.recv_chunk(y).await.unwrap())
+            Some(client.recv_chunk(&y).await.unwrap())
         } else {
             None
         }
-    }).collect();
+    }))
+        .buffered(num_cpus::get()).try_collect().await?;
 
     let mut rec_chunks = vec![None; data_chunks.len()];
     let positions = data_chunks.par_iter().positions(|x| !x.is_some()).collect::<Vec<_>>();
@@ -95,13 +99,13 @@ async fn handle_recv(path: &PathBuf, decryptor: &KuznechikEncryptor) {
 
     data_chunks.append(&mut rec_chunks);
 
-    let data: Vec<Option<Vec<u8>>> = data_chunks.iter().map(|x| async {
+    let data: Vec<Option<Vec<u8>>> = futures::stream::iter(data_chunks).map(|x| tokio::spawn(async move {
         if let Some(y) = x {
             Some(decryptor.decrypt_chunk(y).await.unwrap())
         } else {
             None
         }
-    }).collect();
+    })).buffered(num_cpus::get()).try_collect().await?;
 
     let sharer = ReedSolomonSecretSharer::new().unwrap();
     let content = sharer.recover_from_chunks(data).unwrap();
