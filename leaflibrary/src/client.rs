@@ -114,7 +114,6 @@ impl UdpClient for BroadcastUdpClient {
             let ack = Message::from(buf[..sz].to_vec());
             if let Message::RetrievingAck(h) = ack {
                 if h.eq(&hash) {
-                    buf.fill(0u8);
                     while let Ok((peer_sz, peer_addr)) = self.socket.recv_from(&mut buf).await {
                         let content = Message::from(buf[..peer_sz].to_vec());
                         if peer_addr.eq(&addr) {
@@ -123,15 +122,18 @@ impl UdpClient for BroadcastUdpClient {
                                     result.append(&mut d);
                                 };
                             } else if let Message::Empty(h) = content {
-                                if h.eq(hash) {
+                                if h.eq(&hash) {
                                     return Ok(result);
                                 };
-                            };
+                            } else {
+                                return Err(ReceivingChunkError(String::from("Unexpected message type")));
+                            }
                         };
-                        buf.fill(0u8);
                     };
                 };
-            };
+            } else {
+                return Err(ReceivingChunkError(String::from("No acknowledgement received")));
+            }
         };
 
         if result.len() == 0 {

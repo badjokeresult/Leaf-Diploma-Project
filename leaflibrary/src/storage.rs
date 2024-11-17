@@ -60,6 +60,7 @@ impl UdpStorage for BroadcastUdpServerStorage {
                 return Ok(());
             }
         }
+        println!("{:?}", self.database);
 
         let filename = Uuid::new_v4().to_string() + ".dat";
         let filepath = self.storage_path.join(filename).to_str().unwrap().to_string();
@@ -79,6 +80,7 @@ impl UdpStorage for BroadcastUdpServerStorage {
                 });
             }
         }
+        println!("{:?}", self.database);
         Err(RetrieveChunkError(String::from("Chunk with such hash not found")))
     }
 

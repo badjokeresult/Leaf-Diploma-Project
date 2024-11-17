@@ -8,7 +8,7 @@ use errors::*;
 use consts::*;
 
 pub trait SecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<Option<Vec<u8>>>>, DataSplittingError>;
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<(Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>), DataSplittingError>;
     fn recover_from_chunks(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError>;
 }
 
@@ -39,7 +39,7 @@ impl ReedSolomonSecretSharer {
 }
 
 impl SecretSharer for ReedSolomonSecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<Option<Vec<u8>>>>, DataSplittingError> {
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<(Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>), DataSplittingError> {
         let block_size = Self::calc_block_size(secret.len());
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size);
         let mut buf = vec![0u8; block_size * amount_of_blocks];
@@ -81,7 +81,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
 
         let (data, rec) = chunks.split_at(amount_of_blocks);
 
-        Ok(vec![data.to_vec(), rec.to_vec()])
+        Ok((data.to_vec(), rec.to_vec()))
     }
 
     fn recover_from_chunks(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError> {
