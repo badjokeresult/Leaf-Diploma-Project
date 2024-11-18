@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 use tokio::fs;
 use clap::Parser;
-
 use leaflibrary::*;
 use args::Args;
 use meta::MetaFileInfo;
@@ -30,6 +29,11 @@ async fn handle_send(path: &PathBuf, encryptor: &KuznechikEncryptor) {
     let content = fs::read(path).await.unwrap();
     let sharer = ReedSolomonSecretSharer::new().unwrap();
     let (mut data_chunks, mut rec_chunks) = sharer.split_into_chunks(&content).unwrap();
+
+    println!("LEN OF DATA: {}\nLEN OF PARITY: {}", data_chunks.len(), rec_chunks.len());
+    let a = data_chunks.first().unwrap().clone();
+    let b = rec_chunks.first().unwrap().clone();
+    println!("LEN OF DATA CHUNK: {}\nLEN OF PARITY CHUNK: {}", a.unwrap().len(), b.unwrap().len());
 
     encrypt_data(&mut data_chunks, encryptor).await;
     encrypt_data(&mut rec_chunks, encryptor).await;

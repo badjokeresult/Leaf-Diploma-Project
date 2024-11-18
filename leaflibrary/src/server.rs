@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 
 use rayon::prelude::*;
 
@@ -14,7 +16,7 @@ use atomic_refcell::AtomicRefCell;
 
 use consts::*;
 use crate::message::Message;
-use crate::server::errors::{HandlingMessageError, ServerInitError, ShutdownError};
+use crate::server::errors::{HandlingMessageError, ServerInitError, ServingMessageError, ShutdownError};
 use crate::storage::{BroadcastUdpServerStorage, UdpStorage};
 
 mod consts {
@@ -24,13 +26,15 @@ mod consts {
 
 pub trait UdpServer {
     fn listen(&self) -> impl std::future::Future<Output = Result<(), HandlingMessageError>> + Send;
+    fn serve(&self) -> impl std::future::Future<Output = Result<(), ServingMessageError>> + Send;
     fn shutdown(&self) -> impl std::future::Future<Output = Result<(), ShutdownError>> + Send;
 }
 
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
-    udp_socket: Arc<UdpSocket>,
+    udp_socket: Arc<Mutex<UdpSocket>>,
     storage: AtomicRefCell<BroadcastUdpServerStorage>,
+    packets_queue: Arc<Mutex<VecDeque<(Message, SocketAddr)>>>,
 }
 
 impl BroadcastUdpServer {
@@ -62,10 +66,10 @@ impl BroadcastUdpServer {
             Err(e) => return Err(ServerInitError(e.to_string())),
         };
 
-        let udp_socket = Arc::new(match UdpSocket::from_std(udp_socket) {
+        let udp_socket = Arc::new(Mutex::new(match UdpSocket::from_std(udp_socket) {
             Ok(s) => s,
             Err(e) => return Err(ServerInitError(e.to_string())),
-        });
+        }));
 
         let storage = AtomicRefCell::new(match BroadcastUdpServerStorage::new(
             chunks_folder,
@@ -74,55 +78,13 @@ impl BroadcastUdpServer {
             Err(e) => return Err(ServerInitError(e.to_string())),
         });
 
+        let packets_queue = Arc::new(Mutex::new(VecDeque::new()));
+
         Ok(BroadcastUdpServer {
             udp_socket,
             storage,
+            packets_queue,
         })
-    }
-
-    async fn handle_retrieving_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), HandlingMessageError> {
-        let messages = match self.storage.borrow().retrieve(hash).await {
-            Ok(c) => {
-                let content = Message::new_with_data(hash, &c);
-                content.par_iter().map(|x| x.clone().into()).collect::<Vec<Vec<_>>>()
-            },
-            Err(e) => return Err(HandlingMessageError(e.to_string())),
-        };
-        let ack: Vec<u8> = Message::RetrievingAck(hash.to_vec()).into();
-        match self.udp_socket.send_to(&ack, addr).await {
-            Ok(_) => {},
-            Err(e) => return Err(HandlingMessageError(e.to_string())),
-        };
-        for message in &messages {
-            match self.udp_socket.send_to(message, addr).await {
-                Ok(_) => {},
-                Err(e) => return Err(HandlingMessageError(e.to_string())),
-            };
-        }
-
-        let ending: Vec<u8> = Message::Empty(hash.to_vec()).into();
-        match self.udp_socket.send_to(&ending, addr).await {
-            Ok(_) => {},
-            Err(e) => return Err(HandlingMessageError(e.to_string())),
-        };
-        Ok(())
-    }
-
-    async fn handle_sending_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), HandlingMessageError> {
-        let message: Vec<u8> = Message::SendingAck(hash.to_vec()).into();
-        match self.udp_socket.send_to(&message, addr).await {
-            Ok(_) => {},
-            Err(e) => return Err(HandlingMessageError(e.to_string())),
-        };
-        Ok(())
-    }
-
-    async fn handle_content_filled(&self, hash: &[u8], data: &[u8]) -> Result<(), HandlingMessageError> {
-        match self.storage.borrow_mut().add(hash, data).await {
-            Ok(_) => {},
-            Err(e) => return Err(HandlingMessageError(e.to_string())),
-        };
-        Ok(())
     }
 }
 
@@ -130,32 +92,40 @@ impl UdpServer for BroadcastUdpServer {
     async fn listen(&self) -> Result<(), HandlingMessageError> {
         loop {
             let mut buf = [0u8; MAX_DATAGRAM_SIZE];
-            let (sz, addr) = match self.udp_socket.recv_from(&mut buf).await {
+            let (sz, addr) = match self.udp_socket.lock().await.recv_from(&mut buf).await {
                 Ok((s, a)) => (s, a),
                 Err(e) => return Err(HandlingMessageError(e.to_string())),
             };
             let message = Message::from(buf[..sz].to_vec());
-            match message.clone() {
-                Message::RetrievingReq(h) => {
-                    match self.handle_retrieving_req(&h, addr).await {
-                        Ok(_) => {},
-                        Err(e) => eprintln!("{}", e.to_string()),
-                    };
-                },
-                Message::SendingReq(h) => {
-                    match self.handle_sending_req(&h, addr).await {
-                        Ok(_) => {},
-                        Err(e) => eprintln!("{}", e.to_string()),
-                    };
-                },
-                Message::ContentFilled(h, d) => {
-                    match self.handle_content_filled(&h, &d).await {
-                        Ok(_) => {},
-                        Err(e) => eprintln!("{}", e.to_string()),
-                    };
+            self.packets_queue.lock().await.push_back((message, addr));
+        }
+    }
+
+    async fn serve(&self) -> Result<(), ServingMessageError> {
+        loop {
+            if let Some((message, addr)) = self.packets_queue.lock().await.pop_front() {
+                match message {
+                    Message::RetrievingReq(h) => {
+                        match self.handle_retrieving_req(&h, addr).await {
+                            Ok(_) => {},
+                            Err(e) => eprintln!("{}", e.to_string()),
+                        };
+                    },
+                    Message::SendingReq(h) => {
+                        match self.handle_sending_req(&h, addr).await {
+                            Ok(_) => {},
+                            Err(e) => eprintln!("{}", e.to_string()),
+                        };
+                    },
+                    Message::ContentFilled(h, c) => {
+                        match self.handle_content_filled(&h, &c, addr).await {
+                            Ok(_) => {},
+                            Err(e) => eprintln!("{}", e.to_string()),
+                        };
+                    },
+                    _ => eprintln!("Invalid message received"),
                 }
-                _ => eprintln!("Invalid message received"),
-            };
+            }
         }
     }
 
@@ -164,6 +134,20 @@ impl UdpServer for BroadcastUdpServer {
             Ok(_) => Ok(()),
             Err(e) => Err(ShutdownError(e.to_string())),
         }
+    }
+}
+
+impl BroadcastUdpServer {
+    async fn handle_retrieving_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), ServingMessageError> {
+        todo!()
+    }
+
+    async fn handle_sending_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), ServingMessageError> {
+        todo!()
+    }
+
+    async fn handle_content_filled(&self, hash: &[u8], content: &[u8], addr: SocketAddr) -> Result<(), ServingMessageError> {
+        todo!()
     }
 }
 
@@ -195,6 +179,15 @@ mod errors {
     impl fmt::Display for ShutdownError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "Error during shutdown: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct ServingMessageError(pub String);
+
+    impl fmt::Display for ServingMessageError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error serving message: {}", self.0)
         }
     }
 }
