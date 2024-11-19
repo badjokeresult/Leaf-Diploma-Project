@@ -93,6 +93,7 @@ impl UdpClient for BroadcastUdpClient {
                             Ok(_) => {},
                             Err(e) => return Err(SendingChunkError(e.to_string())),
                         };
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                     return Ok(hash);
                 };

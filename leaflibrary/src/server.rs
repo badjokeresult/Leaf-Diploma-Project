@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,12 +6,8 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
-use rayon::prelude::*;
-
 use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
-
-use atomic_refcell::AtomicRefCell;
 
 use consts::*;
 use crate::message::Message;
@@ -26,15 +21,13 @@ mod consts {
 
 pub trait UdpServer {
     fn listen(&self) -> impl std::future::Future<Output = Result<(), HandlingMessageError>> + Send;
-    fn serve(&self) -> impl std::future::Future<Output = Result<(), ServingMessageError>> + Send;
     fn shutdown(&self) -> impl std::future::Future<Output = Result<(), ShutdownError>> + Send;
 }
 
 #[derive(Clone)]
 pub struct BroadcastUdpServer {
     udp_socket: Arc<Mutex<UdpSocket>>,
-    storage: AtomicRefCell<BroadcastUdpServerStorage>,
-    packets_queue: Arc<Mutex<VecDeque<(Message, SocketAddr)>>>,
+    storage: BroadcastUdpServerStorage,
 }
 
 impl BroadcastUdpServer {
@@ -71,19 +64,16 @@ impl BroadcastUdpServer {
             Err(e) => return Err(ServerInitError(e.to_string())),
         }));
 
-        let storage = AtomicRefCell::new(match BroadcastUdpServerStorage::new(
+        let storage = match BroadcastUdpServerStorage::new(
             chunks_folder,
         ).await {
             Ok(s) => s,
             Err(e) => return Err(ServerInitError(e.to_string())),
-        });
-
-        let packets_queue = Arc::new(Mutex::new(VecDeque::new()));
+        };
 
         Ok(BroadcastUdpServer {
             udp_socket,
             storage,
-            packets_queue,
         })
     }
 }
@@ -97,40 +87,32 @@ impl UdpServer for BroadcastUdpServer {
                 Err(e) => return Err(HandlingMessageError(e.to_string())),
             };
             let message = Message::from(buf[..sz].to_vec());
-            self.packets_queue.lock().await.push_back((message, addr));
-        }
-    }
-
-    async fn serve(&self) -> Result<(), ServingMessageError> {
-        loop {
-            if let Some((message, addr)) = self.packets_queue.lock().await.pop_front() {
-                match message {
-                    Message::RetrievingReq(h) => {
-                        match self.handle_retrieving_req(&h, addr).await {
-                            Ok(_) => {},
-                            Err(e) => eprintln!("{}", e.to_string()),
-                        };
-                    },
-                    Message::SendingReq(h) => {
-                        match self.handle_sending_req(&h, addr).await {
-                            Ok(_) => {},
-                            Err(e) => eprintln!("{}", e.to_string()),
-                        };
-                    },
-                    Message::ContentFilled(h, c) => {
-                        match self.handle_content_filled(&h, &c, addr).await {
-                            Ok(_) => {},
-                            Err(e) => eprintln!("{}", e.to_string()),
-                        };
-                    },
-                    _ => eprintln!("Invalid message received"),
-                }
+            match message.clone() {
+                Message::RetrievingReq(h) => {
+                    match self.handle_retrieving_req(&h, addr).await {
+                        Ok(_) => {},
+                        Err(e) => eprintln!("{}", e.to_string()),
+                    };
+                },
+                Message::SendingReq(h) => {
+                    match self.handle_sending_req(&h, addr).await {
+                        Ok(_) => {},
+                        Err(e) => eprintln!("{}", e.to_string()),
+                    };
+                },
+                Message::ContentFilled(h, c) => {
+                    match self.handle_content_filled(&h, &c).await {
+                        Ok(_) => {},
+                        Err(e) => eprintln!("{}", e.to_string()),
+                    }
+                },
+                _ => eprintln!("Unknown message type"),
             }
         }
     }
 
     async fn shutdown(&self) -> Result<(), ShutdownError> {
-        match self.storage.borrow_mut().shutdown().await {
+        match self.storage.shutdown().await {
             Ok(_) => Ok(()),
             Err(e) => Err(ShutdownError(e.to_string())),
         }
@@ -139,15 +121,47 @@ impl UdpServer for BroadcastUdpServer {
 
 impl BroadcastUdpServer {
     async fn handle_retrieving_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), ServingMessageError> {
-        todo!()
+        let content = match self.storage.retrieve(hash).await {
+            Ok(c) => c,
+            Err(e) => return Err(ServingMessageError(e.to_string())),
+        };
+
+        let retrieving_ack: Vec<u8> = Message::RetrievingAck(hash.to_vec()).into();
+        match self.udp_socket.lock().await.send_to(&retrieving_ack, addr).await {
+            Ok(_) => {},
+            Err(e) => return Err(ServingMessageError(e.to_string())),
+        };
+
+        let content_filled_messages = Message::new_with_data(hash, &content);
+        for msg in content_filled_messages.into_iter() {
+            let d: Vec<u8> = msg.into();
+            match self.udp_socket.lock().await.send_to(&d, addr).await {
+                Ok(_) => {},
+                Err(e) => return Err(ServingMessageError(e.to_string())),
+            };
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+
+        let ending: Vec<u8> = Message::Empty(hash.to_vec()).into();
+        match self.udp_socket.lock().await.send_to(&ending, addr).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ServingMessageError(e.to_string())),
+        }
     }
 
     async fn handle_sending_req(&self, hash: &[u8], addr: SocketAddr) -> Result<(), ServingMessageError> {
-        todo!()
+        let sending_ack: Vec<u8> = Message::SendingAck(hash.to_vec()).into();
+        match self.udp_socket.lock().await.send_to(&sending_ack, addr).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ServingMessageError(e.to_string())),
+        }
     }
 
-    async fn handle_content_filled(&self, hash: &[u8], content: &[u8], addr: SocketAddr) -> Result<(), ServingMessageError> {
-        todo!()
+    async fn handle_content_filled(&self, hash: &[u8], content: &[u8]) -> Result<(), ServingMessageError> {
+        match self.storage.add(hash, content).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ServingMessageError(e.to_string())),
+        }
     }
 }
 
