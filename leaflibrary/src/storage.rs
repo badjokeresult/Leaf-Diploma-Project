@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use atomic_refcell::AtomicRefCell;
+
 use tokio::io::AsyncWriteExt;
 use tokio::fs::OpenOptions;
 use tokio::fs;
@@ -10,7 +12,7 @@ use uuid::Uuid;
 use errors::*;
 
 pub trait UdpStorage {
-    fn add(&mut self, hash: &[u8], data: &[u8]) -> impl std::future::Future<Output = Result<(), AddChunkError>> + Send;
+    fn add(&self, hash: &[u8], data: &[u8]) -> impl std::future::Future<Output = Result<(), AddChunkError>> + Send;
     fn retrieve(&self, hash: &[u8]) -> impl std::future::Future<Output = Result<Vec<u8>, RetrieveChunkError>> + Send;
     fn shutdown(&self) -> impl std::future::Future<Output = Result<(), ShutdownError>> + Send;
 }
@@ -18,74 +20,62 @@ pub trait UdpStorage {
 #[derive(Clone)]
 pub struct BroadcastUdpServerStorage {
     storage_path: PathBuf,
-    database: HashMap<Vec<u8>, String>,
+    database: AtomicRefCell<HashMap<Vec<u8>, String>>,
 }
 
 impl BroadcastUdpServerStorage {
     pub async fn new(storage_path: &PathBuf) -> Result<BroadcastUdpServerStorage, StorageInitError> {
         Ok(BroadcastUdpServerStorage {
             storage_path: storage_path.clone(),
-            database: Self::from_file(storage_path).await.unwrap_or_else(|_| HashMap::new()),
+            database: Self::from_file(storage_path).await.unwrap_or_else(|_| AtomicRefCell::new(HashMap::new())),
         })
     }
 
-    async fn from_file(storage_path: &PathBuf) -> Result<HashMap<Vec<u8>, String>, FromFileInitError> {
-        match fs::read(match storage_path.parent() {
+    async fn from_file(storage_path: &PathBuf) -> Result<AtomicRefCell<HashMap<Vec<u8>, String>>, FromFileInitError> {
+        let data = match fs::read(match storage_path.parent() {
             Some(p) => p.join("db.bin"),
             None => return Err(FromFileInitError(String::from("Error getting working dir"))),
         }).await {
-            Ok(data) => Ok(match serde_json::from_slice(&data) {
-                Ok(j) => j,
-                Err(e) => return Err(FromFileInitError(e.to_string())),
-            }),
-            Err(e) => Err(FromFileInitError(e.to_string())),
-        }
+            Ok(data) => data,
+            Err(e) => return Err(FromFileInitError(e.to_string())),
+        };
+
+        let kv: HashMap<Vec<u8>, String> = serde_json::from_slice(&data).unwrap();
+        Ok(AtomicRefCell::new(kv))
     }
 }
 
 impl UdpStorage for BroadcastUdpServerStorage {
-    async fn add(&mut self, hash: &[u8], data: &[u8]) -> Result<(), AddChunkError> {
-        for (h, s) in &self.database {
-            if hash.eq(h) {
-                let mut f = match OpenOptions::new()
-                    .append(true)
-                    .open(s).await {
-                    Ok(t) => t,
-                    Err(e) => return Err(AddChunkError(e.to_string())),
-                };
-                match f.write(data).await {
-                    Ok(_) => {},
-                    Err(e) => return Err(AddChunkError(e.to_string())),
-                };
-                return Ok(());
-            }
+    async fn add(&self, hash: &[u8], data: &[u8]) -> Result<(), AddChunkError> {
+        if let None = self.database.borrow().get(hash) {
+            let filename = Uuid::new_v4().to_string() + ".dat";
+            let filepath = Some(self.storage_path.join(filename));
+            self.database.borrow_mut().insert(hash.to_vec(), filepath.unwrap().to_str().unwrap().to_string());
         }
-        println!("{:?}", self.database);
-
-        let filename = Uuid::new_v4().to_string() + ".dat";
-        let filepath = self.storage_path.join(filename).to_str().unwrap().to_string();
-        match fs::write(&filepath, data).await {
-            Ok(_) => self.database.insert(hash.to_vec(), filepath),
-            Err(e) => return Err(AddChunkError(e.to_string())),
-        };
-        Ok(())
+        let mut f = match OpenOptions::new()
+            .append(true)
+            .open(self.database.borrow().get(hash).unwrap()).await {
+                Ok(t) => t,
+                Err(e) => return Err(AddChunkError(e.to_string()))
+            };
+        match f.write(data).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(AddChunkError(e.to_string())),
+        }
     }
 
     async fn retrieve(&self, hash: &[u8]) -> Result<Vec<u8>, RetrieveChunkError> {
-        for (h, s) in &self.database {
-            if h.eq(hash) {
-                return Ok(match fs::read(s).await {
-                    Ok(d) => d,
-                    Err(e) => return Err(RetrieveChunkError(e.to_string())),
-                });
+        if let Some(f) = self.database.borrow().get(hash) {
+            return match fs::read(f).await {
+                Ok(data) => Ok(data),
+                Err(e) => Err(RetrieveChunkError(e.to_string())),
             }
         }
-        println!("{:?}", self.database);
-        Err(RetrieveChunkError(String::from("Chunk with such hash not found")))
+        Err(RetrieveChunkError(String::from("No chunk with such hash")))
     }
 
     async fn shutdown(&self) -> Result<(), ShutdownError> {
-        let json = match serde_json::to_vec(&self.database) {
+        let json = match serde_json::to_vec(&self.database.borrow().clone()) {
             Ok(j) => j,
             Err(e) => return Err(ShutdownError(e.to_string())),
         };
