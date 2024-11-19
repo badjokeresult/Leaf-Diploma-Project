@@ -61,7 +61,7 @@ async fn main() {
         });
     };
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
     }
 }
 
