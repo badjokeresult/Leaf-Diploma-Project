@@ -1,3 +1,7 @@
-fn main() {
-    println!("Hello, world!");
+mod config;
+mod socket;
+
+#[tokio::main]
+async fn main() {
+    todo!()
 }

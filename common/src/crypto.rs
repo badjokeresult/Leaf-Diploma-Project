@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 use std::str;
-
-use kuznechik::{AlgOfb, KeyStore, Kuznechik};
-
 use std::cell::RefCell;
 use std::io::Write;
+
+use kuznechik::{AlgOfb, KeyStore, Kuznechik};
 
 use streebog::digest::consts::U32;
 use streebog::digest::core_api::{CoreWrapper, CtVariableCoreWrapper};
