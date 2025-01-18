@@ -1,35 +1,82 @@
 use std::cmp::{max, min};
-use std::io::Error;
 
 use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
 
 use errors::*;
-use consts::*;
 
-pub trait SecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<(Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>), DataSplittingError>;
-    fn recover_from_chunks(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError>;
+pub struct FileParts {
+    data_parts: Vec<Option<Vec<u8>>>,
+    recovery_parts: Vec<Option<Vec<u8>>>,
 }
 
-mod consts {
-    pub const MIN_BLOCK_SIZE: usize = 64;
-    pub const MAX_BLOCK_SIZE: usize = 2 * 1024 * 1024 * 1024;
-    pub const GROWTH_FACTOR: f64 = 0.5;
-    pub const ALIGNMENT: usize = 64;
-}
-
-pub struct ReedSolomonSecretSharer;
-
-impl ReedSolomonSecretSharer {
-    pub fn new() -> Result<ReedSolomonSecretSharer, Error> {
-        Ok(ReedSolomonSecretSharer{})
+impl FileParts {
+    pub fn new(data_parts: Vec<Option<Vec<u8>>>, recovery_parts: Vec<Option<Vec<u8>>>) -> FileParts {
+        FileParts {
+            data_parts,
+            recovery_parts,
+        }
     }
 
-    fn calc_block_size(file_size: usize) -> usize {
-        let bs = MIN_BLOCK_SIZE as f64 * ((file_size as f64 / MIN_BLOCK_SIZE as f64).powf(GROWTH_FACTOR));
-        let bs = max(MIN_BLOCK_SIZE, min(bs as usize, MAX_BLOCK_SIZE));
-        let bs = ((bs + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    pub fn deconstruct(self) -> (Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>) {
+        (self.data_parts, self.recovery_parts)
+    }
+}
+
+pub trait SecretSharer {
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<FileParts, DataSplittingError>;
+    fn recover_from_chunks(&self, chunks: FileParts) -> Result<Vec<u8>, DataRecoveringError>;
+}
+
+pub struct ReedSolomonSecretSharer {
+    min_block_size: usize,
+    max_block_size: usize,
+    growth_factor: f64,
+    alignment: usize,
+}
+
+impl ReedSolomonSecretSharer {
+    pub fn new(min_block_size: Option<usize>, max_block_size: Option<usize>, growth_factor: Option<f64>) -> Result<ReedSolomonSecretSharer, InitializationError> {
+        #[cfg(target_arch = "x86_64" | target_arch = "aarch64" | target_arch = "mips64" | target_arch = "powerpc64")]
+        let alignment: usize = 64;
+
+        #[cfg(target_arch = "x86" | target_arch = "arm" | target_arch = "mips" | target_arch = "powerpc") ]
+        let alignment: usize = 32;
+
+        let min_block_size = match min_block_size {
+            Some(v) => {
+                if v % 64 == 0 {
+                    v
+                } else {
+                    return Err(InitializationError(format!("Invalid min block size value: {}", v)));
+                }
+            },
+            None => 64
+        };
+        let max_block_size = match max_block_size {
+            Some(v) => {
+                if v % 64 == 0 {
+                    v
+                } else {
+                    return Err(InitializationError(format!("Invalid max block size value: {}", v)));
+                }
+            },
+            None => 2 * 1024 * 1024 * 1024,
+        };
+        let growth_factor = growth_factor.unwrap_or(0.5);
+
+        Ok(ReedSolomonSecretSharer{
+            min_block_size,
+            max_block_size,
+            growth_factor,
+            alignment
+        })
+    }
+
+    fn calc_block_size(&self, file_size: usize) -> usize {
+        let bs = self.min_block_size as f64 * ((file_size as f64 / self.min_block_size as f64).powf(self.growth_factor));
+        let bs = max(self.min_block_size, min(bs as usize, self.max_block_size));
+        let bs = ((bs + self.alignment - 1) / self.alignment) * self.alignment;
         bs
     }
 
@@ -39,8 +86,8 @@ impl ReedSolomonSecretSharer {
 }
 
 impl SecretSharer for ReedSolomonSecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<(Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>), DataSplittingError> {
-        let block_size = Self::calc_block_size(secret.len());
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<FileParts, DataSplittingError> {
+        let block_size = self.calc_block_size(secret.len());
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size);
         let mut buf = vec![0u8; block_size * amount_of_blocks];
         for i in 0..secret.len() {
@@ -81,10 +128,11 @@ impl SecretSharer for ReedSolomonSecretSharer {
 
         let (data, rec) = chunks.split_at(amount_of_blocks);
 
-        Ok((data.to_vec(), rec.to_vec()))
+        Ok(FileParts::new(data.to_vec(), rec.to_vec()))
     }
 
-    fn recover_from_chunks(&self, chunks: Vec<Option<Vec<u8>>>) -> Result<Vec<u8>, DataRecoveringError> {
+    fn recover_from_chunks(&self, chunks: FileParts) -> Result<Vec<u8>, DataRecoveringError> {
+        let chunks = chunks.deconstruct();
         let mut full_data = chunks.par_iter().cloned().map(|x| {
             if let Some(d) = x {
                 Some(d)
@@ -132,6 +180,15 @@ mod errors {
     impl fmt::Display for DataRecoveringError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "Error recovering data from chunks: {}", self.0)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct InitializationError(pub String);
+
+    impl fmt::Display for InitializationError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Error initializing data: {}", self.0)
         }
     }
 }

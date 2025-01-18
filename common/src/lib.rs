@@ -1,5 +1,5 @@
 pub mod chunks;
-pub use chunks::{SecretSharer, ReedSolomonSecretSharer};
+pub use chunks::{SecretSharer, ReedSolomonSecretSharer, FileParts};
 
 pub mod crypto;
 pub use crypto::{Encryptor, Hasher, KuznechikEncryptor, StreebogHasher};
