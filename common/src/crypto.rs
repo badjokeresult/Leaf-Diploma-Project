@@ -97,15 +97,6 @@ pub mod errors {
     use std::fmt::Formatter;
 
     #[derive(Debug, Clone)]
-    pub struct UserHomeDirResolvingError;
-
-    impl fmt::Display for UserHomeDirResolvingError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error resolving user home dir")
-        }
-    }
-
-    #[derive(Debug, Clone)]
     pub struct InitializeEncryptorError(pub String);
 
     impl fmt::Display for InitializeEncryptorError {
@@ -138,15 +129,6 @@ pub mod errors {
     impl fmt::Display for DataDecryptionError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "Error decrypting data: {}", self.0)
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct InitializingCredentialsError(pub String);
-
-    impl fmt::Display for InitializingCredentialsError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Error initializing credentials: {}", self.0)
         }
     }
 }
