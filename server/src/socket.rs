@@ -39,14 +39,9 @@ impl Socket {
         }, rx)
     }
 
-    pub async fn send(&self, mut rx: mpsc::Receiver<Packet>) {
-        loop {
-            time::sleep(Duration::from_millis(100)).await;
-            if let Some(p) = rx.recv().await {
-                let (data, addr) = p.deconstruct();
-                self.socket.send_to(&data, addr).await.unwrap();
-            }
-        }
+    pub async fn send(&self, packet: Packet) {
+        let (data, addr) = packet.deconstruct();
+        self.socket.send_to(data.as_slice(), addr).await.unwrap();
     }
 
     pub async fn recv(&self) {
