@@ -37,10 +37,10 @@ pub struct ReedSolomonSecretSharer {
 
 impl ReedSolomonSecretSharer {
     pub fn new(min_block_size: Option<usize>, max_block_size: Option<usize>, growth_factor: Option<f64>) -> Result<ReedSolomonSecretSharer, InitializationError> {
-        #[cfg(target_arch = "x86_64" | target_arch = "aarch64" | target_arch = "mips64" | target_arch = "powerpc64")]
+        #[cfg(target_pointer_width = "64")]
         let alignment: usize = 64;
 
-        #[cfg(target_arch = "x86" | target_arch = "arm" | target_arch = "mips" | target_arch = "powerpc") ]
+        #[cfg(target_pointer_width = "32") ]
         let alignment: usize = 32;
 
         let min_block_size = match min_block_size {
@@ -132,7 +132,9 @@ impl SecretSharer for ReedSolomonSecretSharer {
     }
 
     fn recover_from_chunks(&self, chunks: FileParts) -> Result<Vec<u8>, DataRecoveringError> {
-        let chunks = chunks.deconstruct();
+        let mut chunks = chunks.deconstruct();
+        chunks.0.append(&mut chunks.1);
+        let chunks = chunks.0;
         let mut full_data = chunks.par_iter().cloned().map(|x| {
             if let Some(d) = x {
                 Some(d)
