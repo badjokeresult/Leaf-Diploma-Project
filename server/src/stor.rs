@@ -4,12 +4,14 @@ use std::path::PathBuf;
 
 use tokio::fs;
 use uuid::Uuid;
+use walkdir::WalkDir;
 
 use errors::*;
 
 pub trait ServerStorage {
     async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError>;
     async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrievingDataError>;
+    async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError>;
 }
 
 pub struct UdpServerStorage {
@@ -41,7 +43,23 @@ impl ServerStorage for UdpServerStorage {
             let data = fs::read(x).await.unwrap();
             return Ok(data);
         }
-        Err(RetrievingDataError(format!("No data for such hashsum")))
+        Err(RetrievingDataError(String::from("No data for such hash sum")))
+    }
+
+    async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError> {
+        let mut size = 0;
+        for entry in WalkDir::new(&self.path) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => return Err(RetrievingDataError(format!("{:?}", e))),
+            };
+            if entry.path().is_file() {
+                if let Ok(meta) = entry.path().metadata() {
+                    size += meta.len() as usize;
+                }
+            }
+        }
+        Ok(size)
     }
 }
 
