@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 use errors::*;
 
 pub trait ServerStorage {
-    async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError>;
+    async fn save(&self, hash: &[u8], data: &[u8], is_last: bool) -> Result<(), SavingDataError>;
     async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrievingDataError>;
     async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError>;
 }
@@ -17,6 +17,7 @@ pub trait ServerStorage {
 pub struct UdpServerStorage {
     database: RefCell<HashMap<Vec<u8>, PathBuf>>,
     path: PathBuf,
+    buf: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl UdpServerStorage {
@@ -24,16 +25,24 @@ impl UdpServerStorage {
         UdpServerStorage {
             database: RefCell::new(HashMap::new()),
             path,
+            buf: RefCell::new(HashMap::new()),
         }
     }
 }
 
 impl ServerStorage for UdpServerStorage {
-    async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError> {
-        let filename = self.path.join(PathBuf::from(Uuid::new_v4().to_string()));
-        fs::write(&filename, data).await.unwrap();
-        if let Some(_) = self.database.borrow_mut().insert(hash.to_vec(), filename) {
-            return Ok(());
+    async fn save(&self, hash: &[u8], data: &[u8], is_last: bool) -> Result<(), SavingDataError> {
+        if !is_last {
+            if let Some(mut v) = self.buf.borrow_mut().get(hash) {
+                v.append(&mut data.clone().to_vec());
+            } else {
+                self.buf.borrow_mut().insert(hash.to_vec(), vec![]).unwrap();
+            }
+        } else {
+            let filename = PathBuf::from(String::from(Uuid::new_v4().to_string()));
+            fs::write(&filename, &data).await.unwrap();
+            self.database.borrow_mut().insert(hash.to_vec(), filename).unwrap();
+            self.buf.borrow_mut().remove(hash).unwrap();
         }
         Err(SavingDataError(format!("{:?}", hash)))
     }
