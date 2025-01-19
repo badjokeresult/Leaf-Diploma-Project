@@ -1,7 +1,9 @@
 mod config;
 mod socket;
 
+use common;
+
 #[tokio::main]
 async fn main() {
-    todo!()
+    println!("Hello, world!");
 }
