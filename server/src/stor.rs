@@ -1,10 +1,10 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use tokio::fs;
 use uuid::Uuid;
 use walkdir::WalkDir;
+use atomic_refcell::AtomicRefCell;
 
 use errors::*;
 
@@ -14,18 +14,19 @@ pub trait ServerStorage {
     async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError>;
 }
 
+#[derive(Clone)]
 pub struct UdpServerStorage {
-    database: RefCell<HashMap<Vec<u8>, PathBuf>>,
+    database: AtomicRefCell<HashMap<Vec<u8>, PathBuf>>,
     path: PathBuf,
-    buf: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    buf: AtomicRefCell<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 impl UdpServerStorage {
     pub fn new(path: PathBuf) -> UdpServerStorage {
         UdpServerStorage {
-            database: RefCell::new(HashMap::new()),
+            database: AtomicRefCell::new(HashMap::new()),
             path,
-            buf: RefCell::new(HashMap::new()),
+            buf: AtomicRefCell::new(HashMap::new()),
         }
     }
 }
@@ -33,8 +34,8 @@ impl UdpServerStorage {
 impl ServerStorage for UdpServerStorage {
     async fn save(&self, hash: &[u8], data: &[u8], is_last: bool) -> Result<(), SavingDataError> {
         if !is_last {
-            if let Some(mut v) = self.buf.borrow_mut().get(hash) {
-                v.append(&mut data.clone().to_vec());
+            if let Some(v) = self.buf.borrow_mut().get_mut(hash) {
+                v.append(&mut data.to_vec());
             } else {
                 self.buf.borrow_mut().insert(hash.to_vec(), vec![]).unwrap();
             }

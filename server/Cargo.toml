@@ -8,6 +8,7 @@ uuid = { version = "1.12.0", features = ["v4", "rng"] }
 tokio = { workspace = true }
 common = { path = "../common" }
 walkdir = "2.5.0"
+atomic_refcell = "0.1.13"
 
 [[bin]]
 name = "server"
