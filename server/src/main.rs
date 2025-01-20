@@ -1,11 +1,11 @@
-use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use tokio::time;
 
 use common::Message;
 
-use config::Storage;
+use config::{Storage, NUM_THREADS};
 use stor::ServerStorage;
 use socket::{Packet, Socket};
 
@@ -41,18 +41,18 @@ async fn process_packet(packet: Packet, storage: &Storage, socket: &Socket) {
             }
         },
         Message::ContentFilled(h, d) => {
-            storage.save(&h, &d, false).unwrap();
+            storage.save(&h, &d, false).await.unwrap();
         },
         Message::Empty(h) => {
-            storage.save(&h, vec![], true).unwrap();
+            storage.save(&h, &[0u8; 0], true).await.unwrap();
         },
         _ => {},
     }
 }
 
-async fn process_handler(mut rx: mpsc::Receiver<Packet>, storage: &Storage, socket: &Socket) {
+async fn packet_handler(mut rx: broadcast::Receiver<Packet>, storage: &Storage, socket: &Socket) {
     loop {
-        if let Some(p) = rx.recv().await {
+        if let Ok(p) = rx.recv().await {
             process_packet(p, storage, socket).await;
         }
     }
@@ -60,5 +60,23 @@ async fn process_handler(mut rx: mpsc::Receiver<Packet>, storage: &Storage, sock
 
 #[tokio::main]
 async fn main() {
-    println!("Hello, world!");
+    let (socket, tx) = Socket::new().await;
+    let storage = Storage::new(PathBuf::from(std::env::var("APPDATA").unwrap().as_str()));
+
+    for _ in 0..NUM_THREADS {
+        let rx = tx.subscribe();
+        let socket_clone = socket.clone();
+        let storage_clone = storage.clone();
+        tokio::spawn(async move {
+            packet_handler(rx, &storage_clone, &socket_clone).await;
+        });
+    }
+
+    tokio::spawn(async move {
+        socket.recv().await;
+    });
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
