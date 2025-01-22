@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::str;
 use std::cell::RefCell;
+use std::future::Future;
 use std::io::Write;
 
 use tokio::fs;
@@ -11,6 +12,7 @@ use streebog::digest::core_api::{CoreWrapper, CtVariableCoreWrapper};
 use streebog::{Digest, Oid256, StreebogVarCore};
 
 use errors::*;
+use crate::FileParts;
 
 struct Credentials {
     pub password: String,
@@ -24,8 +26,8 @@ impl Credentials {
 }
 
 pub trait Encryptor {
-    fn encrypt_chunk(&self, chunk: &[u8]) -> impl std::future::Future<Output = Result<Vec<u8>, DataEncryptionError>> + Send;
-    fn decrypt_chunk(&self, chunk: &[u8]) -> impl std::future::Future<Output = Result<Vec<u8>, DataDecryptionError>> + Send;
+    fn encrypt_parts(&self, parts: &mut FileParts) -> impl std::future::Future<Output = Result<FileParts, DataEncryptionError>> + Send;
+    fn decrypt_parts(&self, parts: &mut FileParts) -> impl std::future::Future<Output = Result<FileParts, DataDecryptionError>> + Send;
 }
 
 pub struct KuznechikEncryptor {
@@ -41,7 +43,7 @@ impl KuznechikEncryptor {
         })
     }
 
-    async fn load_passwd_gamma(&self) -> Result<Credentials, LoadingCredentialsError> {
+    async fn load_cipher(&self) -> Result<AlgOfb, LoadingCredentialsError> {
         let password = match fs::read(&self.password_file).await {
             Ok(p) => p,
             Err(e) => return Err(LoadingCredentialsError(e.to_string())),
@@ -56,39 +58,70 @@ impl KuznechikEncryptor {
             Err(e) => return Err(LoadingCredentialsError(e.to_string())),
         };
 
-        Ok(Credentials::new(password, gamma))
+        let credentials = Credentials::new(password, gamma);
+        let key = KeyStore::with_password(&credentials.password);
+        let cipher = AlgOfb::new(&key).gamma(credentials.gamma);
+        Ok(cipher)
     }
 }
 
 impl Encryptor for KuznechikEncryptor {
-    async fn encrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataEncryptionError> {
-        let credentials = match self.load_passwd_gamma().await {
-            Ok(c) => c,
-            Err(e) => return Err(DataEncryptionError(e.to_string())),
-        };
+    async fn encrypt_parts(&self, parts: FileParts) -> Result<FileParts, DataEncryptionError> {
+        let mut cipher = self.load_cipher().await.unwrap();
 
-        let key = KeyStore::with_password(&credentials.password);
-        let mut cipher = AlgOfb::new(&key).gamma(credentials.gamma);
+        let data = parts.get_data_parts();
+        let mut data_result = Vec::with_capacity(data.len());
+        for part in data {
+            if let Some(d) = part {
+                let dt = d.clone();
+                data_result.push(Some(cipher.encrypt(dt)));
+            } else {
+                data_result.push(None)
+            }
+        }
 
-        let data = Vec::from(chunk);
-        let encrypted_chunk = cipher.encrypt(data);
+        let rec = parts.get_recovery_parts();
+        let mut rec_result = Vec::with_capacity(rec.len());
+        for part in rec {
+            if let Some(d) = part {
+                let dt = d.clone();
+                rec_result.push(Some(cipher.encrypt(dt)));
+            } else {
+                rec_result.push(None);
+            }
+        }
 
-        Ok(encrypted_chunk)
+        let result = FileParts::new(data_result, rec_result);
+        Ok(result)
     }
 
-    async fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DataDecryptionError> {
-        let credentials = match self.load_passwd_gamma().await {
-            Ok(c) => c,
-            Err(e) => return Err(DataDecryptionError(e.to_string())),
-        };
+    async fn decrypt_parts(&self, parts: &FileParts) -> Result<FileParts, DataDecryptionError> {
+        let mut cipher = self.load_cipher().await.unwrap();
 
-        let key = KeyStore::with_password(&credentials.password);
-        let mut cipher = AlgOfb::new(&key).gamma(credentials.gamma);
+        let data = parts.get_data_parts();
+        let mut data_result = Vec::with_capacity(data.len());
+        for part in data {
+            if let Some(d) = part {
+                let dt = d.clone();
+                data_result.push(Some(cipher.decrypt(dt)));
+            } else {
+                data_result.push(None)
+            }
+        }
 
-        let data = Vec::from(chunk);
-        let decrypted_chunk = cipher.decrypt(data);
+        let rec = parts.get_recovery_parts();
+        let mut rec_result = Vec::with_capacity(rec.len());
+        for part in rec {
+            if let Some(d) = part {
+                let dt = d.clone();
+                rec_result.push(Some(cipher.decrypt(dt)));
+            } else {
+                rec_result.push(None);
+            }
+        }
 
-        Ok(decrypted_chunk)
+        let result = FileParts::new(data_result, rec_result);
+        Ok(result)
     }
 }
 
@@ -134,7 +167,7 @@ pub mod errors {
 }
 
 pub trait Hasher {
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Vec<u8>;
+    fn calc_hash_for_parts(&self, parts: &FileParts) -> FileParts;
 }
 
 pub struct StreebogHasher {
@@ -150,14 +183,42 @@ impl StreebogHasher {
 }
 
 impl Hasher for StreebogHasher {
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Vec<u8> {
-        self.hasher.borrow_mut().update(chunk);
-        let result = self.hasher.borrow_mut().clone().finalize();
+    fn calc_hash_for_parts(&self, parts: &FileParts) -> FileParts {
+        let data = parts.get_data_parts();
+        let mut data_hashes = Vec::with_capacity(data.len());
+        let rec = parts.get_recovery_parts();
+        let mut rec_hashes = Vec::with_capacity(rec.len());
 
-        let result = result.to_vec();
-        self.hasher.borrow_mut().flush().unwrap();
+        for part in data {
+            if let Some(d) = part {
+                self.hasher.borrow_mut().update(d);
+                let result = self.hasher.borrow_mut().clone().finalize();
 
-        result
+                let result = result.to_vec();
+                self.hasher.borrow_mut().flush().unwrap();
+
+                data_hashes.push(Some(result));
+            } else {
+                data_hashes.push(None);
+            }
+        }
+
+        for part in rec {
+            if let Some(d) = part {
+                self.hasher.borrow_mut().update(d);
+                let result = self.hasher.borrow_mut().clone().finalize();
+
+                let result = result.to_vec();
+                self.hasher.borrow_mut().flush().unwrap();
+
+                rec_hashes.push(Some(result));
+            } else {
+                rec_hashes.push(None);
+            }
+        }
+
+        let parts = FileParts::new(data_hashes, rec_hashes);
+        parts
     }
 }
 

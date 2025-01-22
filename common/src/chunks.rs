@@ -18,6 +18,14 @@ impl FileParts {
         }
     }
 
+    pub fn get_data_parts(&self) -> &Vec<Option<Vec<u8>>> {
+        &self.data_parts
+    }
+
+    pub fn get_recovery_parts(&self) -> &Vec<Option<Vec<u8>>> {
+        &self.recovery_parts
+    }
+
     pub fn deconstruct(self) -> (Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>) {
         (self.data_parts, self.recovery_parts)
     }
