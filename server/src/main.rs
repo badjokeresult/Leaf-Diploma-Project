@@ -1,19 +1,18 @@
 use std::path::PathBuf;
 use std::time::Duration;
+
 use tokio::sync::broadcast;
 use tokio::time;
 
 use common::Message;
 
-use config::{Storage, NUM_THREADS};
-use stor::ServerStorage;
+use stor::{ServerStorage, UdpServerStorage};
 use socket::{Packet, Socket};
 
-mod config;
 mod stor;
 mod socket;
 
-async fn process_packet(packet: Packet, storage: &Storage, socket: &Socket) {
+async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Socket) {
     time::sleep(Duration::from_millis(100)).await;
     let addr = packet.addr;
     let message = Message::from(packet.data);
@@ -50,7 +49,7 @@ async fn process_packet(packet: Packet, storage: &Storage, socket: &Socket) {
     }
 }
 
-async fn packet_handler(mut rx: broadcast::Receiver<Packet>, storage: &Storage, socket: &Socket) {
+async fn packet_handler(mut rx: broadcast::Receiver<Packet>, storage: &UdpServerStorage, socket: &Socket) {
     loop {
         if let Ok(p) = rx.recv().await {
             process_packet(p, storage, socket).await;
@@ -61,9 +60,9 @@ async fn packet_handler(mut rx: broadcast::Receiver<Packet>, storage: &Storage, 
 #[tokio::main]
 async fn main() {
     let (socket, tx) = Socket::new().await;
-    let storage = Storage::new(PathBuf::from(std::env::var("APPDATA").unwrap().as_str()));
+    let storage = UdpServerStorage::new(PathBuf::from(std::env::var("APPDATA").unwrap().as_str()));
 
-    for _ in 0..NUM_THREADS {
+    for _ in 0..4 {
         let rx = tx.subscribe();
         let socket_clone = socket.clone();
         let storage_clone = storage.clone();
