@@ -2,38 +2,13 @@ use std::cmp::{max, min};
 
 use reed_solomon_erasure::{galois_8, ReedSolomon};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use errors::*;
 
-pub struct FileParts {
-    data_parts: Vec<Option<Vec<u8>>>,
-    recovery_parts: Vec<Option<Vec<u8>>>,
-}
-
-impl FileParts {
-    pub fn new(data_parts: Vec<Option<Vec<u8>>>, recovery_parts: Vec<Option<Vec<u8>>>) -> FileParts {
-        FileParts {
-            data_parts,
-            recovery_parts,
-        }
-    }
-
-    pub fn get_data_parts(&self) -> &Vec<Option<Vec<u8>>> {
-        &self.data_parts
-    }
-
-    pub fn get_recovery_parts(&self) -> &Vec<Option<Vec<u8>>> {
-        &self.recovery_parts
-    }
-
-    pub fn deconstruct(self) -> (Vec<Option<Vec<u8>>>, Vec<Option<Vec<u8>>>) {
-        (self.data_parts, self.recovery_parts)
-    }
-}
-
 pub trait SecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<FileParts, DataSplittingError>;
-    fn recover_from_chunks(&self, chunks: FileParts) -> Result<Vec<u8>, DataRecoveringError>;
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>), DataSplittingError>;
+    fn recover_from_chunks(&self, data: Vec<Vec<u8>>, rec: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError>;
 }
 
 pub struct ReedSolomonSecretSharer {
@@ -44,34 +19,16 @@ pub struct ReedSolomonSecretSharer {
 }
 
 impl ReedSolomonSecretSharer {
-    pub fn new(min_block_size: Option<usize>, max_block_size: Option<usize>, growth_factor: Option<f64>) -> Result<ReedSolomonSecretSharer, InitializationError> {
+    pub fn new() -> Result<ReedSolomonSecretSharer, InitializationError> {
         #[cfg(target_pointer_width = "64")]
         let alignment: usize = 64;
 
         #[cfg(target_pointer_width = "32") ]
         let alignment: usize = 32;
 
-        let min_block_size = match min_block_size {
-            Some(v) => {
-                if v % 64 == 0 {
-                    v
-                } else {
-                    return Err(InitializationError(format!("Invalid min block size value: {}", v)));
-                }
-            },
-            None => 64
-        };
-        let max_block_size = match max_block_size {
-            Some(v) => {
-                if v % 64 == 0 {
-                    v
-                } else {
-                    return Err(InitializationError(format!("Invalid max block size value: {}", v)));
-                }
-            },
-            None => 2 * 1024 * 1024 * 1024,
-        };
-        let growth_factor = growth_factor.unwrap_or(0.5);
+        let min_block_size = 64;
+        let max_block_size = 4 * 1024 * 1024 * 1024;
+        let growth_factor = 0.5_f64;
 
         Ok(ReedSolomonSecretSharer{
             min_block_size,
@@ -94,7 +51,7 @@ impl ReedSolomonSecretSharer {
 }
 
 impl SecretSharer for ReedSolomonSecretSharer {
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<FileParts, DataSplittingError> {
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>), DataSplittingError> {
         let block_size = self.calc_block_size(secret.len());
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size);
         let mut buf = vec![0u8; block_size * amount_of_blocks];
@@ -132,24 +89,15 @@ impl SecretSharer for ReedSolomonSecretSharer {
         }
 
         encoder.encode(&mut blocks).unwrap();
-        let chunks = blocks.par_iter().cloned().map(Some).collect::<Vec<_>>();
-
-        let (data, rec) = chunks.split_at(amount_of_blocks);
-
-        Ok(FileParts::new(data.to_vec(), rec.to_vec()))
+        let (data, rec) = blocks.split_at(amount_of_blocks);
+        Ok((data.to_vec(), rec.to_vec()))
     }
 
-    fn recover_from_chunks(&self, chunks: FileParts) -> Result<Vec<u8>, DataRecoveringError> {
-        let mut chunks = chunks.deconstruct();
-        chunks.0.append(&mut chunks.1);
-        let chunks = chunks.0;
-        let mut full_data = chunks.par_iter().cloned().map(|x| {
-            if let Some(d) = x {
-                Some(d)
-            } else {
-                None
-            }
-        }).collect::<Vec<_>>();
+    fn recover_from_chunks(&self, data: Vec<Vec<u8>>, mut rec: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError> {
+        let mut chunks = data;
+        chunks.append(&mut rec);
+
+        let mut full_data = chunks.par_iter().cloned().map(Some).collect::<Vec<_>>();
         let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2);
 
         let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(data_len, recovery_len).unwrap();
