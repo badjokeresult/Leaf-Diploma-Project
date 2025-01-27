@@ -79,7 +79,7 @@ impl KuznechikEncryptor {
         };
 
         if result != 0 {
-            return Err("Invalid password".into()); // Если данные неверны - возвращаем ошибку
+            return Err(InitializationError(String::from("Invalid password"))); // Если данные неверны - возвращаем ошибку
         }
 
         unsafe {
@@ -199,7 +199,7 @@ impl Encryptor for KuznechikEncryptor { // Блок реализации тре�
     fn decrypt_chunk(&self, chunk: &mut [u8]) -> Result<(), DecryptionError> { // Метод дешифрования данных на месте
         // Если данные не выравнены по 16 байт, то возвращаем ошибку
         if chunk.len() % 16 != 0 {
-            return Err("Invalid encrypted data length".into());
+            return Err(DecryptionError(String::from("Invalid encrypted data length")));
         }
 
         let mut result = Vec::with_capacity(chunk.len()); // Создаем буфер для хранения дешифрованных данных

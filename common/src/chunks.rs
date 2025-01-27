@@ -109,7 +109,7 @@ impl SecretSharer for ReedSolomonSecretSharer { // Реализация трей
     }
 
     fn recover_from_chunks(&self, blocks: impl Blocks) -> Result<Vec<u8>, DataRecoveringError> { // Метод восстановления файла из блоков
-        let (mut data, mut recovery) = blocks.deconstruct(); // Получение данных и восстановления
+        let (mut data, recovery) = blocks.deconstruct(); // Получение данных и восстановления
         if let Some(mut r) = recovery {
             data.append(&mut r); // Соединение данных и восстановления в один вектор
         }
