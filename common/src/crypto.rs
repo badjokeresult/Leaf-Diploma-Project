@@ -38,7 +38,7 @@ pub struct KuznechikEncryptor { // Структура, реализующая ш
 
 impl KuznechikEncryptor {
     #[cfg(target_os = "linux")]
-    async fn new(password: &str) -> Result<Self, InitializationError> { // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Linux)
+    pub async fn new(password: &str) -> Result<Self, InitializationError> { // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Linux)
         let username = env::var("USER")?; // Получаем имя текущего пользователя из переменной среды
         let mut authenticator = pam::Authenticator::with_password("system-auth")?; // Получаем экземпляр PAM-аутентификатора
         authenticator.get_handler().set_credentials(&username, password); // Отдаем аутентификатору имя пользователя и пароль
@@ -51,7 +51,7 @@ impl KuznechikEncryptor {
     }
 
     #[cfg(target_os = "windows")]
-    async fn new(password: &str) -> Result<Self, InitializationError> { // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Windows)
+    pub async fn new(password: &str) -> Result<Self, InitializationError> { // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Windows)
         // Загружаем необходимые зависимости
         use windows_sys::Win32::Security::LogonUserW;
         use windows_sys::Win32::Security::LOGON32_LOGON_INTERACTIVE;
