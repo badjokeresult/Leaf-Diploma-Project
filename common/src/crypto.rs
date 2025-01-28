@@ -131,10 +131,7 @@ impl KuznechikEncryptor {
 
     async fn get_metadata_path() -> Result<PathBuf, InitializationError> { // Метод получения пути файла с метаданными
         #[cfg(target_os = "linux")]
-        let base_path = {
-            let username = env::var("USER").or_else(|_| env::var("USERNAME")).unwrap();
-            PathBuf::from("/home").join(&username).join(".config")
-        }; // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
+        let base_path = PathBuf::from("/etc"); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
 
         #[cfg(target_os = "windows")]
         let base_path = PathBuf::from(env::var("APPDATA").unwrap()); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
