@@ -1,5 +1,5 @@
 pub mod chunks;
-pub use chunks::{SecretSharer, ReedSolomonSecretSharer, Blocks, ReedSolomonBlocks}; // Импорт трейтов и структур для внешних пользователей
+pub use chunks::{SecretSharer, ReedSolomonSecretSharer}; // Импорт трейтов и структур для внешних пользователей
 
 pub mod crypto;
 pub use crypto::{Encryptor, Hasher, KuznechikEncryptor, StreebogHasher}; // Импорт трейтов и структур для внешних пользователей

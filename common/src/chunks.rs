@@ -18,31 +18,9 @@ mod consts { // Модуль с константами
     pub const ALIGNMENT: usize = 32; // Если система 32-битная - выравнивание по 32
 }
 
-pub trait Blocks { // Трейт для структуры блоков
-    fn new_from(data: Vec<Vec<u8>>, optional: Option<Vec<Vec<u8>>>) -> Self; // Метод для создания нового типа блока из блоков данных и доп.блоков
-    fn deconstruct(self) -> (Vec<Vec<u8>>, Option<Vec<Vec<u8>>>); // Метод для удаления типа и получения значений его полей
-}
-
-pub struct ReedSolomonBlocks { // Структура для хранения блоков схемы Рида-Соломона
-    data: Vec<Vec<u8>>, // Блоки данных
-    recovery: Option<Vec<Vec<u8>>>, // Блоки восстановления
-}
-
-impl Blocks for ReedSolomonBlocks { // Реализация трейта для структуры
-    fn new_from(data: Vec<Vec<u8>>, optional: Option<Vec<Vec<u8>>>) -> Self { // Создаем структуру из основных и восстанавливающих данных
-        ReedSolomonBlocks {
-            data, recovery: optional,
-        }
-    }
-
-    fn deconstruct(self) -> (Vec<Vec<u8>>, Option<Vec<Vec<u8>>>) { // Получение полей структуры и удаление ссылки на структуру
-        (self.data, self.recovery) // Возвращаем в виде кортежа
-    }
-}
-
 pub trait SecretSharer { // Трейт, которому должна удовлетворять структура
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<impl Blocks, DataSplittingError>; // Метод для разбиения файлов на куски
-    fn recover_from_chunks(&self, blocks: impl Blocks) -> Result<Vec<u8>, DataRecoveringError>; // Метод восстановления файлов из блоков
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>, DataSplittingError>; // Метод для разбиения файлов на куски
+    fn recover_from_chunks(&self, blocks: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError>; // Метод восстановления файлов из блоков
 }
 
 pub struct ReedSolomonSecretSharer; // Структура схемы Рида-Соломона
@@ -65,7 +43,7 @@ impl ReedSolomonSecretSharer {
 }
 
 impl SecretSharer for ReedSolomonSecretSharer { // Реализация трейта
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<impl Blocks, DataSplittingError> { // Метод разбиения файла на блоки
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>, DataSplittingError> { // Метод разбиения файла на блоки
         let block_size = self.calc_block_size(secret.len()); // Получение размера блока
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size); // Получение количества блоков
         let mut buf = vec![0u8; block_size * amount_of_blocks]; // Создание буфера для хранения блоков
@@ -103,18 +81,11 @@ impl SecretSharer for ReedSolomonSecretSharer { // Реализация трей
         }
 
         encoder.encode(&mut blocks).unwrap(); // Создание блоков восстановления при помощи кодировщика
-        let (data, rec) = blocks.split_at(amount_of_blocks); // Разбиение вектора на два равных по середине
-        let blocks = ReedSolomonBlocks::new_from(data.to_vec(), Some(rec.to_vec())); // Создание структуры блоков Рида-Соломона
         Ok(blocks)
     }
 
-    fn recover_from_chunks(&self, blocks: impl Blocks) -> Result<Vec<u8>, DataRecoveringError> { // Метод восстановления файла из блоков
-        let (mut data, recovery) = blocks.deconstruct(); // Получение данных и восстановления
-        if let Some(mut r) = recovery {
-            data.append(&mut r); // Соединение данных и восстановления в один вектор
-        }
-
-        let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
+    fn recover_from_chunks(&self, blocks: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError> { // Метод восстановления файла из блоков
+        let mut full_data = blocks.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
         let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2); // Получение длин данных и восстановления
 
         let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(data_len, recovery_len).unwrap(); // Создание декодера Рида-Соломона
