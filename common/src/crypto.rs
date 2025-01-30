@@ -39,12 +39,12 @@ pub struct KuznechikEncryptor { // Структура, реализующая ш
 impl KuznechikEncryptor {
     #[cfg(target_os = "linux")]
     pub async fn new(password: &str) -> Result<Self, InitializationError> { // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Linux)
-        let username = env::var("USER")?; // Получаем имя текущего пользователя из переменной среды
-        let mut authenticator = pam::Authenticator::with_password("system-auth")?; // Получаем экземпляр PAM-аутентификатора
-        authenticator.get_handler().set_credentials(&username, password); // Отдаем аутентификатору имя пользователя и пароль
+        let username = env::var("USER").unwrap(); // Получаем имя текущего пользователя из переменной среды
+        let mut pam_client = pam::Client::with_password("system-auth").unwrap(); // Получаем экземпляр PAM-аутентификатора
+        pam_client.conversation_mut().set_credentials(&username, password); // Отдаем аутентификатору имя пользователя и пароль
 
-        if authenticator.authenticate().is_err() { // Проверяем правильность введенных данных
-            return Err("Invalid password".into()); // Если аутентификация провалена, возвращаем ошибку
+        if let Err(e) = pam_client.authenticate() { // Проверяем правильность введенных данных
+            return Err(InitializationError(e.to_string())); // Если аутентификация провалена, возвращаем ошибку
         }
 
         Self::initialize(password).await // Запускаем метод инициализации ключа и гаммы
