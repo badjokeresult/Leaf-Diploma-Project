@@ -3,16 +3,11 @@
 
 mod args;
 mod parts;
-mod hashes;
 mod socket;
 
 use std::path::PathBuf;
-use tokio::net::UdpSocket;
-// use tokio::fs;
-// use common::{KuznechikEncryptor, ReedSolomonSecretSharer, SecretSharer};
 
 use args::{load_args, Action};
-use common::Message;
 use crate::parts::{FileParts, Parts};
 
 #[tokio::main]
@@ -27,32 +22,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn send_file(file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    // let mut parts = FileParts::from_file(file).await;
-    // // Ask for password here
-    // let password = "Helloworld";
-    // parts.encrypt(password).await;
-    // parts.calc_hashes().await;
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    let message = Message::SendingReq([0u8; 256].to_vec());
-    socket.set_broadcast(true)?;
-    let data: Vec<u8> = message.into();
-    socket.send_to(&data, "255.255.255.255:62092").await?;
-    let mut buf = [0u8; 1024];
-    while let Ok((_, a)) = socket.recv_from(&mut buf).await {
-        println!("OK: {}", a);
-    }
+    let mut parts = FileParts::from_file(file).await.unwrap();
+    let password = "Hello world"; // Should ask for password properly
+    parts.encrypt(password).await.unwrap();
+    parts.send_into_domain().await.unwrap();
+    parts.save_metadata().await.unwrap();
     Ok(())
 }
 
 async fn recv_file(file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    let message = Message::RetrievingReq([0u8; 256].to_vec());
-    socket.set_broadcast(true)?;
-    let data: Vec<u8> = message.into();
-    socket.send_to(&data, "255.255.255.255:62092").await?;
-    let mut buf = [0u8; 1024];
-    while let Ok((_, a)) = socket.recv_from(&mut buf).await {
-        println!("OK: {}", a);
-    }
+    let mut parts = FileParts::load_from_metadata(file).await.unwrap();
+    parts.recv_from_domain().await.unwrap();
+    let password = "Hello world";
+    parts.decrypt(password).await.unwrap();
+    parts.restore_as_file().await.unwrap();
     Ok(())
 }
