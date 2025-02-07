@@ -1,5 +1,6 @@
+use std::hash::Hash;
 use tokio::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -12,41 +13,38 @@ pub trait Parts: Sized {
     async fn from_file(path: impl AsRef<Path>) -> Result<Self, SplittingFileError>;
     async fn encrypt(&mut self, password: &str) -> Result<(), EncryptionError>;
     async fn send_into_domain(&mut self) -> Result<(), SharingChunksError>;
-    async fn save_metadata(self) -> Result<(), SavingMetadataError>;
-    async fn load_from_metadata(path: impl AsRef<Path>) -> Result<Self, LoadingMetadataError>;
+    async fn save_metadata(self, path: impl AsRef<Path>, other: Self) -> Result<(), SavingMetadataError>;
+    async fn load_from_metadata(path: impl AsRef<Path>) -> Result<(Self, Self), LoadingMetadataError>;
     async fn recv_from_domain(&mut self) -> Result<(), ReceivingChunksError>;
     async fn decrypt(&mut self, password: &str) -> Result<(), DecryptionError>;
-    async fn restore_as_file(self) -> Result<(), RestoringFileError>;
+    async fn restore_as_file(self, path: impl AsRef<Path>, other: Self) -> Result<(), RestoringFileError>;
+    fn len(&self) -> usize;
+    fn get_data_cloned(&self) -> Vec<Vec<u8>>;
+    fn get_hashes_cloned(&self) -> Vec<Vec<u8>>;
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct FileParts {
     data: Vec<Vec<u8>>,
-    recovery: Vec<Vec<u8>>,
-    data_hashes: Vec<Vec<u8>>,
-    recovery_hashes: Vec<Vec<u8>>,
-    path: PathBuf,
+    hashes: Vec<Vec<u8>>,
 }
 
 impl FileParts {
+    fn new(data: Vec<Vec<u8>>, hashes: Vec<Vec<u8>>) -> FileParts {
+        FileParts { data, hashes }
+    }
     fn calc_hashes(&mut self) {
         let hasher = StreebogHasher::new();
         let mut data_hashes: Vec<Vec<u8>> = Vec::with_capacity(self.data.len());
-        let mut recovery_hashes: Vec<Vec<u8>> = Vec::with_capacity(self.recovery.len());
         for d in &self.data {
             data_hashes.push(hasher.calc_hash_for_chunk(d));
         }
-        for r in &self.recovery {
-            recovery_hashes.push(hasher.calc_hash_for_chunk(r));
-        }
-
-        self.data_hashes = data_hashes;
-        self.recovery_hashes = recovery_hashes;
+        self.hashes = data_hashes;
     }
 }
 
 impl Parts for FileParts {
-    async fn from_file(path: impl AsRef<Path>) -> Result<Self, SplittingFileError> {
+    async fn from_file(path: impl AsRef<Path>) -> Result<(Self, Self), SplittingFileError> {
         let sharer = ReedSolomonSecretSharer::new().unwrap();
         let mut file = OpenOptions::new()
             .read(true)
@@ -59,13 +57,13 @@ impl Parts for FileParts {
         file.set_len(0).await.unwrap();
 
         let (data, recovery) = chunks.split_at(chunks.len() / 2);
-        Ok(Self {
+        Ok((Self {
             data: data.to_vec(),
-            recovery: recovery.to_vec(),
-            data_hashes: Vec::new(),
-            recovery_hashes: Vec::new(),
-            path: path.as_ref().to_owned(),
-        })
+            hashes: Vec::with_capacity(data.len()),
+        }, Self {
+            data: recovery.to_vec(),
+            hashes: Vec::with_capacity(recovery.len()),
+        }))
     }
 
     async fn encrypt(&mut self, password: &str) -> Result<(), EncryptionError> {
@@ -73,40 +71,30 @@ impl Parts for FileParts {
         for d in &mut self.data {
             encryptor.encrypt_chunk(d).unwrap();
         }
-        for r in &mut self.recovery {
-            encryptor.encrypt_chunk(r).unwrap();
-        }
 
         Ok(())
     }
 
     async fn send_into_domain(&mut self) -> Result<(), SharingChunksError> {
-        if self.recovery.len() % self.data.len() != 0 {
-            return Err(SharingChunksError(format!("Data = {}, Recovery = {}", self.data.len(), self.recovery.len())));
-        }
-
         self.calc_hashes();
+
         let socket = ClientSocket::new().await.unwrap();
-        for i in 0..self.data.len() {
-            socket.send(&self.data_hashes[i], &self.data[i]).await.unwrap();
-        }
-        for i in 0..self.recovery.len() {
-            socket.send(&self.recovery_hashes[i], &self.recovery[i]).await.unwrap();
-        }
-
+        socket.send(&mut self).await.unwrap();
         self.data.clear();
-        self.recovery.clear();
 
         Ok(())
     }
 
-    async fn save_metadata(self) -> Result<(), SavingMetadataError> {
+    async fn save_metadata(mut self, path: impl AsRef<Path>, mut other: Self) -> Result<(), SavingMetadataError> {
+        self.data.append(&mut other.data);
+        self.hashes.append(&mut other.hashes);
+
         let json = serde_json::to_vec(&self).unwrap();
-        fs::write(&self.path, &json).await.unwrap();
+        fs::write(path, &json).await.unwrap();
         Ok(())
     }
 
-    async fn load_from_metadata(path: impl AsRef<Path>) -> Result<Self, LoadingMetadataError> {
+    async fn load_from_metadata(path: impl AsRef<Path>) -> Result<(Self, Self), LoadingMetadataError> {
         let mut file = OpenOptions::new()
             .read(true)
             .write(false)
@@ -114,25 +102,18 @@ impl Parts for FileParts {
             .open(path).await.unwrap();
         let mut buf = [0u8; 4 * 1024 * 1024 * 1024];
         let sz = file.read(&mut buf).await.unwrap();
-        let parts = serde_json::from_slice(&buf[..sz]).unwrap();
-        Ok(parts)
+        let parts: FileParts = serde_json::from_slice(&buf[..sz]).unwrap();
+
+        let ((data, recovery), (data_hashes, recovery_hashes)) = (parts.data.split_at(parts.data.len() / 2), parts.hashes.split_at(parts.hashes.len() / 2));
+        let data_parts = FileParts::new(data.to_vec(), data_hashes.to_vec());
+        let recovery_parts = FileParts::new(recovery.to_vec(), recovery_hashes.to_vec());
+
+        Ok((data_parts, recovery_parts))
     }
 
     async fn recv_from_domain(&mut self) -> Result<(), ReceivingChunksError> {
         let socket = ClientSocket::new().await.unwrap();
-        for i in 0..self.data_hashes.len() {
-            if let Ok(d) = socket.recv(&self.data_hashes[i]).await {
-                self.data.push(d);
-                self.recovery.push(Vec::new());
-            } else {
-                if let Ok(r) = socket.recv(&self.recovery_hashes[i]).await {
-                    self.recovery.push(r);
-                    self.data.push(Vec::new());
-                } else {
-                    return Err(ReceivingChunksError(format!("Cannot retrieve data {:?} and recovery {:?}", &self.data_hashes[i], &self.recovery_hashes[i])));
-                }
-            }
-        }
+        socket.recv(&mut self).await.unwrap();
         Ok(())
     }
 
@@ -141,25 +122,34 @@ impl Parts for FileParts {
         for d in &mut self.data {
             decryptor.decrypt_chunk(d).unwrap();
         }
-        for r in &mut self.recovery {
-            decryptor.decrypt_chunk(r).unwrap();
-        }
 
         Ok(())
     }
 
-    async fn restore_as_file(mut self) -> Result<(), RestoringFileError> {
+    async fn restore_as_file(mut self, path: impl AsRef<Path>, mut other: Self) -> Result<(), RestoringFileError> {
         let sharer = ReedSolomonSecretSharer::new().unwrap();
         let mut file = OpenOptions::new()
         .read(false)
         .write(true)
         .truncate(true)
-            .open(self.path)
-            .await.unwrap();
-        self.data.append(&mut self.recovery);
+        .open(path)
+        .await.unwrap();
+        self.data.append(&mut other.data);
         let content = sharer.recover_from_chunks(self.data).unwrap();
         file.write_all(&content).await.unwrap();
         Ok(())
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn get_data_cloned(&self) -> Vec<Vec<u8>> {
+        self.data.clone()
+    }
+
+    fn get_hashes_cloned(&self) -> Vec<Vec<u8>> {
+        self.hashes.clone()
     }
 }
 
