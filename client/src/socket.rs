@@ -1,6 +1,6 @@
-use tokio::net::UdpSocket;
-use common::Message;
 use crate::parts::{FileParts, Parts};
+use common::Message;
+use tokio::net::UdpSocket;
 
 pub trait Socket {
     async fn send(&self, parts: &mut FileParts) -> Result<(), Box<dyn std::error::Error>>;
@@ -30,10 +30,11 @@ impl Socket for ClientSocket {
             let req: Vec<u8> = Message::SendingReq(hashes[i].clone()).into();
             self.socket.send_to(&req, "255.255.255.255:62092").await?;
             while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
-                let ack = Message::from(&buf[..sz]);
+                let ack = Message::from(buf[..sz].to_vec());
                 if let Message::SendingAck(h) = ack {
                     if h.iter().eq(&hashes[i]) {
-                        let stream = Message::generate_stream_for_chunk(&hashes[i], &data[i]).unwrap();
+                        let stream =
+                            Message::generate_stream_for_chunk(&hashes[i], &data[i]).unwrap();
                         for msg in stream {
                             let message_bin: Vec<u8> = msg.into();
                             self.socket.send_to(&message_bin, addr).await?;
@@ -55,13 +56,21 @@ impl Socket for ClientSocket {
             let req: Vec<u8> = Message::RetrievingReq(hashes[i].clone()).into();
             self.socket.send_to(&req, "255.255.255.255:62092").await?;
             while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
-                let ack = Message::from(&buf[..sz]);
+                let ack = Message::from(buf[..sz].to_vec());
                 if let Message::RetrievingAck(h) = ack {
                     if h.iter().eq(&hashes[i]) {
-                        
+                        while let Ok((sz, addr)) = self.socket.recv_from(&mut buf).await {
+                            let content = Message::from(buf[..sz].to_vec());
+                            if let Message::ContentFilled(h, d) = content {
+                                data.push(d);
+                            }
+                        }
                     }
                 }
             }
         }
+
+        parts.paste_data(data)?;
+        Ok(())
     }
 }
