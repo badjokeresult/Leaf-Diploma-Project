@@ -6,6 +6,21 @@ use reed_solomon_erasure::{galois_8, ReedSolomon}; // Внешняя завис�
 use consts::*; // Внутренний модуль с константами
 use errors::*; // Внутренний модуль со специфическими ошибками
 
+pub struct ReedSolomonChunks {
+    data: Vec<u8>,
+    recovery: Vec<u8>,
+}
+
+impl ReedSolomonChunks {
+    pub fn new(data: Vec<u8>, recovery: Vec<u8>) -> ReedSolomonChunks {
+        ReedSolomonChunks { data, recovery }
+    }
+
+    pub fn deconstruct(self) -> (Vec<u8>, Vec<u8>) {
+        (self.data, self.recovery)
+    }
+}
+
 mod consts {
     // Модуль с константами
     pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
@@ -21,8 +36,11 @@ mod consts {
 
 pub trait SecretSharer {
     // Трейт, которому должна удовлетворять структура
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>, DataSplittingError>; // Метод для разбиения файлов на куски
-    fn recover_from_chunks(&self, blocks: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError>; // Метод восстановления файлов из блоков
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<ReedSolomonChunks, DataSplittingError>; // Метод для разбиения файлов на куски
+    fn recover_from_chunks(
+        &self,
+        blocks: ReedSolomonChunks,
+    ) -> Result<Vec<u8>, DataRecoveringError>; // Метод восстановления файлов из блоков
 }
 
 pub struct ReedSolomonSecretSharer; // Структура схемы Рида-Соломона
@@ -50,7 +68,7 @@ impl ReedSolomonSecretSharer {
 
 impl SecretSharer for ReedSolomonSecretSharer {
     // Реализация трейта
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<Vec<Vec<u8>>, DataSplittingError> {
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<ReedSolomonChunks, DataSplittingError> {
         // Метод разбиения файла на блоки
         let block_size = self.calc_block_size(secret.len()); // Получение размера блока
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size); // Получение количества блоков
@@ -90,12 +108,37 @@ impl SecretSharer for ReedSolomonSecretSharer {
         }
 
         encoder.encode(&mut blocks).unwrap(); // Создание блоков восстановления при помощи кодировщика
-        Ok(blocks)
+        let (data, recovery) = blocks.split_at(blocks.len() / 2);
+        let data = data
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect::<Vec<u8>>();
+        let recovery = recovery
+            .into_iter()
+            .map(|x| x.to_vec())
+            .flatten()
+            .collect::<Vec<u8>>();
+        Ok(ReedSolomonChunks::new(data, recovery))
     }
 
-    fn recover_from_chunks(&self, blocks: Vec<Vec<u8>>) -> Result<Vec<u8>, DataRecoveringError> {
+    fn recover_from_chunks(
+        &self,
+        blocks: ReedSolomonChunks,
+    ) -> Result<Vec<u8>, DataRecoveringError> {
         // Метод восстановления файла из блоков
-        let mut full_data = blocks.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
+        let (data, recovery) = blocks.deconstruct();
+        let block_size = self.calc_block_size(data.len()); // Получение размера блока
+        let mut data = data
+            .chunks(block_size)
+            .map(|x| x.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        let mut recovery = recovery
+            .chunks(block_size)
+            .map(|x| x.to_vec())
+            .collect::<Vec<Vec<u8>>>();
+        data.append(&mut recovery);
+        let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
         let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2); // Получение длин данных и восстановления
 
         let decoder: ReedSolomon<galois_8::Field> =
