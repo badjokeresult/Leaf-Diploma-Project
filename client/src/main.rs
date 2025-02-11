@@ -72,11 +72,11 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     socket.set_broadcast(true).unwrap();
     for i in 0..data.len() {
         let data_hashes = metadata.get_data();
-        send_chunk(&socket, &data_hashes[i], &data[i]);
+        send_chunk(&socket, &data_hashes[i], &data[i]).await;
     }
     for i in 0..recovery.len() {
         let recv_hashes = metadata.get_recv();
-        send_chunk(&socket, &recv_hashes[i], &recovery[i]);
+        send_chunk(&socket, &recv_hashes[i], &recovery[i]).await;
     }
 
     let json = serde_json::to_vec(&metadata).unwrap();
