@@ -87,12 +87,8 @@ async fn main() {
         });
     }
 
-    tokio::spawn(async move {
-        // Запуск асинхронного потока для приема пакетов от сокета
-        socket.recv().await;
-    });
-
     loop {
         tokio::time::sleep(Duration::from_millis(100)).await; // Запуск бесконечного цикла для продолжения работы основного потока с ожиданием для переключения на другие работающие потоки
+        socket.recv().await;
     }
 }

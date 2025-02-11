@@ -12,7 +12,7 @@ mod consts {
     // Модуль с константами
     pub const LOCAL_ADDR: &str = "0.0.0.0:62092"; // Строка адреса для открытия сокета
     pub const CHAN_QUEUE_SIZE: usize = 100; // Размер очереди для канала
-    pub const UDP_SOCKET_BUF_SIZE: usize = 1024; // Размер буфера для приема данных из сети
+    pub const UDP_SOCKET_BUF_SIZE: usize = 65535; // Размер буфера для приема данных из сети
     pub const TIMEOUT_MILLIS: u64 = 100; // Значение таймаута для переключения потока
 }
 
