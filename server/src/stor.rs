@@ -72,6 +72,7 @@ impl ServerStorage for UdpServerStorage {
     }
 
     async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrievingDataError> {
+        println!("{:?}", self.database.borrow().keys().collect::<Vec<_>>());
         // Метод чтения данных с диска
         if let Some(x) = self.database.borrow_mut().remove(hash) {
             // Если полученный хэш указывает на файл, то удаляем запись из таблицы
