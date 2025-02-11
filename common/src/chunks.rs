@@ -101,7 +101,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
             blocks.push(chunk); // Заполнение основного буфера
         }
 
-        let mut parity = vec![0u8; blocks.len()];
+        let mut parity = vec![vec![0u8; block_size]; blocks.len()];
         encoder.encode_sep(&blocks, &mut parity).unwrap(); // Создание блоков восстановления при помощи кодировщика
         let (data, recovery) = blocks.split_at(blocks.len() / 2);
         let data = data
