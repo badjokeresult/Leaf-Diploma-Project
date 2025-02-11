@@ -101,13 +101,8 @@ impl SecretSharer for ReedSolomonSecretSharer {
             blocks.push(chunk); // Заполнение основного буфера
         }
 
-        blocks.append(&mut vec![vec![0u8; block_size]; amount_of_recovers]); // Выделение места в векторе блоков для блоков восстановления
-        if blocks.len() < amount_of_blocks * 2 {
-            eprintln!("ERROR BLOCKS_LEN < amount_of_blocks * 2");
-            panic!(); // Ошибка, если длина вектора меньше двух длин количества блоков
-        }
-
-        encoder.encode(&mut blocks).unwrap(); // Создание блоков восстановления при помощи кодировщика
+        let mut parity = vec![0u8; blocks.len()];
+        encoder.encode_sep(&blocks, &mut parity).unwrap(); // Создание блоков восстановления при помощи кодировщика
         let (data, recovery) = blocks.split_at(blocks.len() / 2);
         let data = data
             .into_iter()
