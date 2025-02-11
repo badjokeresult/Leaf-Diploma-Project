@@ -13,7 +13,7 @@ use base64::prelude::*; // Внешняя зависимость для коди
 //     // Из них вычитаем 8 байт заголовка UDP
 //     // Из них вычитаем 20 байт заголовка IP
 //     // Из них вычитаем 256 байт хэш-суммы
-//     pub const MAX_MESSAGE_SIZE: usize = 65251;
+//     pub const MAX_MESSAGE_SIZE: usize = 65535;
 // }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]

@@ -7,16 +7,16 @@ use consts::*; // Внутренний модуль с константами
 use errors::*; // Внутренний модуль со специфическими ошибками
 
 pub struct ReedSolomonChunks {
-    data: Vec<u8>,
-    recovery: Vec<u8>,
+    data: Vec<Vec<u8>>,
+    recovery: Vec<Vec<u8>>,
 }
 
 impl ReedSolomonChunks {
-    pub fn new(data: Vec<u8>, recovery: Vec<u8>) -> ReedSolomonChunks {
+    pub fn new(data: Vec<Vec<u8>>, recovery: Vec<Vec<u8>>) -> ReedSolomonChunks {
         ReedSolomonChunks { data, recovery }
     }
 
-    pub fn deconstruct(self) -> (Vec<u8>, Vec<u8>) {
+    pub fn deconstruct(self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         (self.data, self.recovery)
     }
 }
@@ -24,7 +24,7 @@ impl ReedSolomonChunks {
 mod consts {
     // Модуль с константами
     pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
-    pub const MAX_BLOCK_SIZE: usize = 4 * 1024 * 1024 * 1024; // Максимальный размер блока - 4 гигабайта
+    pub const MAX_BLOCK_SIZE: usize = 65251; // Максимальный размер блока - 4 гигабайта
     pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
 
     #[cfg(target_pointer_width = "64")]
@@ -104,17 +104,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
         let mut parity = vec![vec![0u8; block_size]; blocks.len()];
         encoder.encode_sep(&blocks, &mut parity).unwrap(); // Создание блоков восстановления при помощи кодировщика
         let (data, recovery) = blocks.split_at(blocks.len() / 2);
-        let data = data
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect::<Vec<u8>>();
-        let recovery = recovery
-            .into_iter()
-            .map(|x| x.to_vec())
-            .flatten()
-            .collect::<Vec<u8>>();
-        Ok(ReedSolomonChunks::new(data, recovery))
+        Ok(ReedSolomonChunks::new(data.to_vec(), recovery.to_vec()))
     }
 
     fn recover_from_chunks(
@@ -122,16 +112,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
         blocks: ReedSolomonChunks,
     ) -> Result<Vec<u8>, DataRecoveringError> {
         // Метод восстановления файла из блоков
-        let (data, recovery) = blocks.deconstruct();
-        let block_size = self.calc_block_size(data.len()); // Получение размера блока
-        let mut data = data
-            .chunks(block_size)
-            .map(|x| x.to_vec())
-            .collect::<Vec<Vec<u8>>>();
-        let mut recovery = recovery
-            .chunks(block_size)
-            .map(|x| x.to_vec())
-            .collect::<Vec<Vec<u8>>>();
+        let (mut data, mut recovery) = blocks.deconstruct();
         data.append(&mut recovery);
         let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
         let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2); // Получение длин данных и восстановления

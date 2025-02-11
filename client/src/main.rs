@@ -1,6 +1,4 @@
 mod args;
-// mod parts;
-// mod socket;
 
 use std::path::PathBuf;
 
@@ -12,25 +10,24 @@ use common::{
 use serde::{Deserialize, Serialize};
 use tokio::{fs, net::UdpSocket};
 
-// use crate::parts::{FileParts, Parts};
 use args::{load_args, Action};
 
 #[derive(Serialize, Deserialize)]
 struct Metadata {
-    data: Vec<u8>,
-    recovery: Vec<u8>,
+    data: Vec<Vec<u8>>,
+    recovery: Vec<Vec<u8>>,
 }
 
 impl Metadata {
-    pub fn new(data: Vec<u8>, recovery: Vec<u8>) -> Metadata {
+    pub fn new(data: Vec<Vec<u8>>, recovery: Vec<Vec<u8>>) -> Metadata {
         Metadata { data, recovery }
     }
 
-    pub fn get_data(&self) -> Vec<u8> {
+    pub fn get_data(&self) -> Vec<Vec<u8>> {
         self.data.clone()
     }
 
-    pub fn get_recv(&self) -> Vec<u8> {
+    pub fn get_recv(&self) -> Vec<Vec<u8>> {
         self.recovery.clone()
     }
 }
@@ -54,28 +51,32 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
 
     let password = "n0tp3nt3$t";
     let encryptor = KuznechikEncryptor::new(password).await.unwrap();
-    encryptor.encrypt_chunk(&mut data).unwrap();
-    encryptor.encrypt_chunk(&mut recovery).unwrap();
+    for c in data.iter_mut() {
+        encryptor.encrypt_chunk(c).unwrap();
+    }
+    for c in recovery.iter_mut() {
+        encryptor.encrypt_chunk(c).unwrap();
+    }
 
     let hasher = StreebogHasher::new();
-    let data_hash = hasher.calc_hash_for_chunk(&data);
-    let recv_hash = hasher.calc_hash_for_chunk(&recovery);
+    let (mut data_hash, mut recv_hash) = (vec![], vec![]);
+    for c in data.iter_mut() {
+        data_hash.push(hasher.calc_hash_for_chunk(c));
+    }
+    for c in recovery.iter_mut() {
+        recv_hash.push(hasher.calc_hash_for_chunk(c));
+    }
     let metadata = Metadata::new(data_hash, recv_hash);
 
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
     socket.set_broadcast(true).unwrap();
-    let req: Vec<u8> = Message::SendingReq(metadata.get_data()).into();
-    socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
-    let mut ack = [0u8; 4096];
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-    if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
-        let ack = Message::from(ack[..sz].to_vec());
-        if let Message::SendingAck(h) = ack {
-            if h.iter().eq(&metadata.get_data()) {
-                let content: Vec<u8> = Message::ContentFilled(metadata.get_data(), data).into();
-                socket.send_to(&content, addr).await.unwrap();
-            }
-        }
+    for i in 0..data.len() {
+        let data_hashes = metadata.get_data();
+        send_chunk(&socket, &data_hashes[i], &data[i]);
+    }
+    for i in 0..recovery.len() {
+        let recv_hashes = metadata.get_recv();
+        send_chunk(&socket, &recv_hashes[i], &recovery[i]);
     }
 
     let json = serde_json::to_vec(&metadata).unwrap();
@@ -85,41 +86,61 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+async fn send_chunk(socket: &UdpSocket, hash: &[u8], data: &[u8]) {
+    let req: Vec<u8> = Message::SendingReq(hash.to_vec()).into();
+    socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
+    let mut ack = [0u8; 4096];
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
+        let ack = Message::from(ack[..sz].to_vec());
+        if let Message::SendingAck(h) = ack {
+            if h.iter().eq(hash) {
+                let content: Vec<u8> = Message::ContentFilled(hash.to_vec(), data.to_vec()).into();
+                socket.send_to(&content, addr).await.unwrap();
+            }
+        }
+    }
+}
+
+async fn recv_chunk(socket: &UdpSocket, hash: &[u8]) -> Vec<u8> {
+    let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
+    socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
+    let mut content = [0u8; 4096];
+    if let Ok((sz, _)) = socket.recv_from(&mut content).await {
+        let content = Message::from(content[..sz].to_vec());
+        if let Message::ContentFilled(h, d) = content {
+            if h.iter().eq(hash) {
+                return d;
+            }
+        }
+    }
+    vec![]
+}
+
 async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let content = fs::read(&filepath).await.unwrap();
     let json = BASE64_STANDARD.decode(&content).unwrap();
     let metadata: Metadata = serde_json::from_slice(&json).unwrap();
 
-    let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-    socket.set_broadcast(true).unwrap();
-    let req: Vec<u8> = Message::RetrievingReq(metadata.get_data()).into();
-    socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
     let mut data = vec![];
     let mut recv = vec![];
-    let mut content = vec![];
-    if let Ok((sz, _)) = socket.recv_from(&mut content).await {
-        let content = Message::from(content[..sz].to_vec());
-        if let Message::ContentFilled(h, d) = content {
-            if h.iter().eq(&metadata.get_data()) {
-                data = d;
-            }
-        }
+    let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+    socket.set_broadcast(true).unwrap();
+    for h in metadata.get_data().iter() {
+        data.push(recv_chunk(&socket, h).await);
     }
-    let req: Vec<u8> = Message::RetrievingReq(metadata.get_recv()).into();
-    socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
-    if let Ok((sz, _)) = socket.recv_from(&mut content).await {
-        let content = Message::from(content[..sz].to_vec());
-        if let Message::ContentFilled(h, d) = content {
-            if h.iter().eq(&metadata.get_recv()) {
-                recv = d;
-            }
-        }
+    for h in metadata.get_recv().iter() {
+        recv.push(recv_chunk(&socket, h).await);
     }
 
     let password = "n0tp3nt3$t";
     let decryptor = KuznechikEncryptor::new(password).await.unwrap();
-    decryptor.decrypt_chunk(&mut data).unwrap();
-    decryptor.decrypt_chunk(&mut recv).unwrap();
+    for c in data.iter_mut() {
+        decryptor.decrypt_chunk(c).unwrap();
+    }
+    for c in recv.iter_mut() {
+        decryptor.decrypt_chunk(c).unwrap();
+    }
 
     let chunks = ReedSolomonChunks::new(data, recv);
     let sharer = ReedSolomonSecretSharer::new().unwrap();
