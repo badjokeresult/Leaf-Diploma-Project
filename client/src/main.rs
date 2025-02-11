@@ -67,6 +67,7 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let req: Vec<u8> = Message::SendingReq(metadata.get_data()).into();
     socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
     let mut ack = vec![];
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
         let ack = Message::from(ack[..sz].to_vec());
         if let Message::SendingAck(h) = ack {
