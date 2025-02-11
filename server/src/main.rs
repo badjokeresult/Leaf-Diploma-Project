@@ -1,6 +1,6 @@
 use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
 use std::time::Duration; // Зависимость стандартной библиотеки для с простоем потоков
-use std::env;
+
 use tokio::fs; // Внешняя зависимость для работы с дисковыми операциями ввода-вывода в асинхронном исполнении
 use tokio::sync::broadcast; // Внешняя зависимость для работы с широковещательными асинхронными каналами
 use tokio::time; // Внешняя зависимость для асинхронной работы с временем
@@ -67,7 +67,7 @@ async fn main() {
     let (socket, tx) = Socket::new().await; // Создание объекта сокета
 
     #[cfg(windows)]
-    let base_path = PathBuf::from(env::var("APPDATA").unwrap()); // Базовый путь для Windows
+    let base_path = PathBuf::from(std::env::var("APPDATA").unwrap()); // Базовый путь для Windows
 
     #[cfg(not(windows))]
     let base_path = PathBuf::from("/var/local"); // Базовый путь для Linux
