@@ -63,7 +63,10 @@ impl UdpServerStorage {
 impl ServerStorage for UdpServerStorage {
     async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError> {
         // Метод сохранения данных на диске
-        let filename = PathBuf::from(String::from(Uuid::new_v4().to_string() + ".bin")); // Генерируем имя файла
+        println!("HASH = {:?}\nDATA = {:?}", hash, data);
+        let filename = self.path.join(PathBuf::from(String::from(
+            Uuid::new_v4().to_string() + ".bin",
+        ))); // Генерируем имя файла
         fs::write(&filename, &data).await.unwrap(); // Записываем данные в созданный файл
         self.database
             .borrow_mut()
