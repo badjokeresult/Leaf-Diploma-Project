@@ -69,6 +69,7 @@ impl ServerStorage for UdpServerStorage {
             .borrow_mut()
             .insert(hash.to_vec(), filename)
             .unwrap(); // Сохраняем имя файла и хэш в таблицу
+        println!("{:?}", self.database);
         Ok(())
     }
 

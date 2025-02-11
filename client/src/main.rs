@@ -66,7 +66,7 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     socket.set_broadcast(true).unwrap();
     let req: Vec<u8> = Message::SendingReq(metadata.get_data()).into();
     socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
-    let mut ack = vec![];
+    let mut ack = [0u8; 4096];
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
         let ack = Message::from(ack[..sz].to_vec());
@@ -79,7 +79,7 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     }
 
     let json = serde_json::to_vec(&metadata).unwrap();
-    let mut result = vec![];
+    let mut result = [0u8; 4096];
     BASE64_STANDARD.encode_slice(&json, &mut result).unwrap();
     fs::write(filepath, &result).await.unwrap();
     Ok(())
