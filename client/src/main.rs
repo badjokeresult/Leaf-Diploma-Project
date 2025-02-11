@@ -2,6 +2,7 @@ mod args;
 
 use std::path::PathBuf;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use common::{
     Encryptor, Hasher, KuznechikEncryptor, Message, ReedSolomonChunks, ReedSolomonSecretSharer,
     SecretSharer, StreebogHasher,
@@ -82,8 +83,9 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         println!("RECV CHUNK WITH INDEX {} was sent", i);
     }
 
-    let json = serde_json::to_string_pretty(&metadata).unwrap();
-    fs::write(filepath, &json).await.unwrap();
+    let json = serde_json::to_vec(&metadata).unwrap();
+    let b64 = BASE64_STANDARD.encode(json);
+    fs::write(filepath, &b64).await.unwrap();
     Ok(())
 }
 
@@ -119,8 +121,9 @@ async fn recv_chunk(socket: &UdpSocket, hash: &[u8]) -> Vec<u8> {
 }
 
 async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let content = fs::read(&filepath).await.unwrap();
-    let metadata: Metadata = serde_json::from_slice(&content).unwrap();
+    let content = fs::read_to_string(&filepath).await.unwrap();
+    let json = BASE64_STANDARD.decode(content).unwrap();
+    let metadata: Metadata = serde_json::from_slice(&json).unwrap();
 
     let mut data = vec![];
     let mut recv = vec![];
