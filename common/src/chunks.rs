@@ -72,9 +72,9 @@ impl SecretSharer for ReedSolomonSecretSharer {
         // Метод разбиения файла на блоки
         let block_size = self.calc_block_size(secret.len()); // Получение размера блока
         let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size); // Получение количества блоков
-        let mut buf = vec![]; // Создание буфера для хранения блоков
-        for i in secret {
-            buf.push(*i); // Перемещение байтов файла в буфер
+        let mut buf = vec![0u8; block_size * amount_of_blocks]; // Создание буфера для хранения блоков
+        for i in 0..secret.len() {
+            buf[i] = secret[i]; // Перемещение байтов файла в буфер
         }
 
         let amount_of_recovers = amount_of_blocks; // Количество блоков восстановления равно количеству блоков данных
