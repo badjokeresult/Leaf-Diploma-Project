@@ -55,10 +55,8 @@ async fn packet_handler(
     socket: &Socket,
 ) {
     // Метод обработчика пакетов
-    loop {
-        if let Ok(p) = rx.recv().await {
-            process_packet(p, storage, socket).await;
-        }
+    while let Ok(p) = rx.recv().await {
+        process_packet(p, storage, socket).await;
     }
 }
 

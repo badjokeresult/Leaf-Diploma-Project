@@ -67,7 +67,12 @@ impl ServerStorage for UdpServerStorage {
             Uuid::new_v4().to_string() + ".bin",
         ))); // Генерируем имя файла
         fs::write(&filename, &data).await.unwrap(); // Записываем данные в созданный файл
-        self.database.borrow_mut().insert(hash.to_vec(), filename); // Сохраняем имя файла и хэш в таблицу
+        if let Some(x) = self.database.borrow_mut().insert(hash.to_vec(), filename) {
+            return Err(SavingDataError(format!(
+                "Hash already presents file {:#?}",
+                x
+            )));
+        } // Сохраняем имя файла и хэш в таблицу
         Ok(())
     }
 
