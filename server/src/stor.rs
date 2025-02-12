@@ -4,7 +4,7 @@ use std::path::PathBuf; // Зависимость стандартной биб�
 
 use std::sync::Arc;
 use tokio::fs; // Внешняя зависимость для асинхронной работы с файловой системой
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockWriteGuard};
 use uuid::Uuid; // Внешняя зависимость для создания UUID
 use walkdir::WalkDir; // Внешняя зависимость для прохода по директориям файловой системы // Внешняя зависимость для обеспечения атомарной внутренней изменяемости объектов
 
@@ -69,7 +69,8 @@ impl ServerStorage for UdpServerStorage {
         ))); // Генерируем имя файла
         fs::write(&filename, &data).await.unwrap(); // Записываем данные в созданный файл
         let hash: Box<[u8]> = Box::from(hash);
-        if let Some(x) = self.database.blocking_write().insert(hash, filename) {
+        let mut db: RwLockWriteGuard<'_, HashMap<Box<[u8]>, PathBuf>> = self.database.write().await;
+        if let Some(x) = db.insert(hash, filename) {
             return Err(SavingDataError(format!(
                 "Hash already presents file {:#?}",
                 x
@@ -82,8 +83,9 @@ impl ServerStorage for UdpServerStorage {
         for key in self.database.read().await.keys() {
             println!("{:#?}", key);
         }
+        let mut db: RwLockWriteGuard<'_, HashMap<Box<[u8]>, PathBuf>> = self.database.write().await;
         // Метод чтения данных с диска
-        if let Some(x) = self.database.blocking_write().remove(hash) {
+        if let Some(x) = db.remove(hash) {
             // Если полученный хэш указывает на файл, то удаляем запись из таблицы
             let data = fs::read(x).await.unwrap(); // Читаем файл
             return Ok(data); // Возвращаем содержимое файла
