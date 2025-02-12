@@ -63,19 +63,26 @@ impl UdpServerStorage {
 
 impl ServerStorage for UdpServerStorage {
     async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError> {
-        // Метод сохранения данных на диске
-        let filename = self.path.join(PathBuf::from(String::from(
-            Uuid::new_v4().to_string() + ".bin",
-        ))); // Генерируем имя файла
-        fs::write(&filename, &data).await.unwrap(); // Записываем данные в созданный файл
-        let hash: Box<[u8]> = Box::from(hash);
-        let mut db: RwLockWriteGuard<'_, HashMap<Box<[u8]>, PathBuf>> = self.database.write().await;
-        if let Some(x) = db.insert(hash, filename) {
+        let hash: Box<[u8]> = hash.to_vec().into_boxed_slice();
+
+        let mut db = self.database.write().await;
+
+        // Проверяем, существует ли уже такой хэш
+        if db.contains_key(&hash) {
             return Err(SavingDataError(format!(
                 "Hash already presents file {:#?}",
-                x
+                db.get(&hash).unwrap()
             )));
-        } // Сохраняем имя файла и хэш в таблицу
+        }
+
+        // Генерируем имя файла и записываем данные
+        let filename = self.path.join(format!("{}.bin", Uuid::new_v4()));
+        tokio::fs::write(&filename, data)
+            .await
+            .map_err(|e| SavingDataError(e.to_string()))?;
+
+        // Добавляем хэш и путь к файлу в хранилище
+        db.insert(hash, filename);
         Ok(())
     }
 
