@@ -25,8 +25,8 @@ pub trait ServerStorage {
 #[derive(Clone)]
 pub struct UdpServerStorage {
     // Структура хранилища
-    database: AtomicRefCell<HashMap<Vec<u8>, PathBuf>>, // Хэш-таблица, хранящая хэш-суммы и пути к файлам на диске, выполненная в атомарном исполнении с внутренней изменяемостью
-    path: PathBuf,                                      // Путь до хранилища
+    database: AtomicRefCell<HashMap<Box<[u8]>, PathBuf>>, // Хэш-таблица, хранящая хэш-суммы и пути к файлам на диске, выполненная в атомарном исполнении с внутренней изменяемостью
+    path: PathBuf,                                        // Путь до хранилища
 }
 
 impl UdpServerStorage {
@@ -67,7 +67,11 @@ impl ServerStorage for UdpServerStorage {
             Uuid::new_v4().to_string() + ".bin",
         ))); // Генерируем имя файла
         fs::write(&filename, &data).await.unwrap(); // Записываем данные в созданный файл
-        if let Some(x) = self.database.borrow_mut().insert(hash.to_vec(), filename) {
+        if let Some(x) = self
+            .database
+            .borrow_mut()
+            .insert(hash.to_vec().into_boxed_slice(), filename)
+        {
             return Err(SavingDataError(format!(
                 "Hash already presents file {:#?}",
                 x
