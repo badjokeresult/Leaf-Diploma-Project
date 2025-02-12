@@ -2,8 +2,9 @@ use std::collections::HashMap; // Зависимость стандартной 
 use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
                         // Защита БД
 
-use atomic_refcell::AtomicRefCell;
+use std::sync::Arc;
 use tokio::fs; // Внешняя зависимость для асинхронной работы с файловой системой
+use tokio::sync::RwLock;
 use uuid::Uuid; // Внешняя зависимость для создания UUID
 use walkdir::WalkDir; // Внешняя зависимость для прохода по директориям файловой системы // Внешняя зависимость для обеспечения атомарной внутренней изменяемости объектов
 
@@ -25,15 +26,15 @@ pub trait ServerStorage {
 #[derive(Clone)]
 pub struct UdpServerStorage {
     // Структура хранилища
-    database: AtomicRefCell<HashMap<Box<[u8]>, PathBuf>>, // Хэш-таблица, хранящая хэш-суммы и пути к файлам на диске, выполненная в атомарном исполнении с внутренней изменяемостью
-    path: PathBuf,                                        // Путь до хранилища
+    database: Arc<RwLock<HashMap<Box<[u8]>, PathBuf>>>, // Хэш-таблица, хранящая хэш-суммы и пути к файлам на диске, выполненная в атомарном исполнении с внутренней изменяемостью
+    path: PathBuf,                                      // Путь до хранилища
 }
 
 impl UdpServerStorage {
     pub fn new(path: PathBuf) -> UdpServerStorage {
         // Создание нового экземпляра хранилища
         UdpServerStorage {
-            database: AtomicRefCell::new(HashMap::new()),
+            database: Arc::new(RwLock::new(HashMap::new())),
             path,
         }
     }
@@ -67,11 +68,8 @@ impl ServerStorage for UdpServerStorage {
             Uuid::new_v4().to_string() + ".bin",
         ))); // Генерируем имя файла
         fs::write(&filename, &data).await.unwrap(); // Записываем данные в созданный файл
-        if let Some(x) = self
-            .database
-            .borrow_mut()
-            .insert(hash.to_vec().into_boxed_slice(), filename)
-        {
+        let hash: Box<[u8]> = Box::from(hash);
+        if let Some(x) = self.database.blocking_write().insert(hash, filename) {
             return Err(SavingDataError(format!(
                 "Hash already presents file {:#?}",
                 x
@@ -81,11 +79,11 @@ impl ServerStorage for UdpServerStorage {
     }
 
     async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrievingDataError> {
-        for key in self.database.borrow().keys() {
+        for key in self.database.read().await.keys() {
             println!("{:#?}", key);
         }
         // Метод чтения данных с диска
-        if let Some(x) = self.database.borrow_mut().remove(hash) {
+        if let Some(x) = self.database.blocking_write().remove(hash) {
             // Если полученный хэш указывает на файл, то удаляем запись из таблицы
             let data = fs::read(x).await.unwrap(); // Читаем файл
             return Ok(data); // Возвращаем содержимое файла

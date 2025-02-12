@@ -14,7 +14,7 @@ mod socket; // Объявление модуля UDP-сокета
 mod stor; // Объявление модуля хранилища
 
 async fn process_packet(
-    // Функция для обработки пришедшего сообщения
+    // Функция для обработки пришедшего сообщени
     packet: Packet,
     storage: &UdpServerStorage,
     socket: &Socket,
