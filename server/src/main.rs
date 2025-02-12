@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use stor::{ServerStorage, UdpServerStorage};
 use tokio::fs;
-use tokio::sync::broadcast;
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio::time;
 
 mod socket;
@@ -39,19 +39,17 @@ async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Soc
     }
 }
 
-async fn packet_handler(
-    mut rx: broadcast::Receiver<Packet>,
-    storage: &UdpServerStorage,
-    socket: &Socket,
-) {
-    while let Ok(p) = rx.recv().await {
+async fn packet_handler(mut rx: Receiver<Packet>, storage: &UdpServerStorage, socket: &Socket) {
+    while let Some(p) = rx.recv().await {
         process_packet(p, storage, socket).await;
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let (socket, tx) = Socket::new().await;
+    let socket = Socket::new().await;
+
+    let (tx, rx) = channel(100);
 
     #[cfg(windows)]
     let base_path = PathBuf::from(std::env::var("APPDATA").unwrap());
@@ -64,17 +62,13 @@ async fn main() {
 
     let storage = UdpServerStorage::new(path);
 
-    for _ in 0..4 {
-        let rx = tx.subscribe();
-        let socket_clone = socket.clone();
-        let storage_clone = storage.clone();
-        tokio::spawn(async move {
-            packet_handler(rx, &storage_clone, &socket_clone).await;
-        });
-    }
+    let socket_clone = socket.clone();
+    tokio::spawn(async move {
+        packet_handler(rx, &storage, &socket_clone).await;
+    });
 
     loop {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        socket.recv().await;
+        socket.recv(&tx).await;
     }
 }
