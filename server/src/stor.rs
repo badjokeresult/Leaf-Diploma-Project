@@ -56,7 +56,7 @@ impl ServerStorage for UdpServerStorage {
         let mut db = self.database.write().await;
 
         if db.contains_key(&hash) {
-            println!("Hash already present: {}", hash); // Логирование хэш-суммы
+            println!("Hash already present: {}", hash);
             return Err(SavingDataError(format!(
                 "Hash already presents file {:#?}",
                 db.get(&hash).unwrap()
@@ -64,7 +64,7 @@ impl ServerStorage for UdpServerStorage {
         }
 
         let filename = self.path.join(format!("{}.bin", Uuid::new_v4()));
-        println!("Saving file with hash: {}", hash); // Логирование хэш-суммы
+        println!("Saving file with hash: {}", hash);
         tokio::fs::write(&filename, data)
             .await
             .map_err(|e| SavingDataError(e.to_string()))?;

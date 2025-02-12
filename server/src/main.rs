@@ -16,6 +16,7 @@ async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Soc
     let message = Message::from(packet.data);
     match message.clone() {
         Message::SendingReq(h) => {
+            println!("Received SendingReq with hash: {}", h); // Логирование получения запроса
             if storage.can_save().await {
                 let ack: Vec<u8> = Message::SendingAck(h).into();
                 let packet = Packet::new(ack, addr);
@@ -23,6 +24,7 @@ async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Soc
             }
         }
         Message::RetrievingReq(h) => {
+            println!("Received RetrievingReq with hash: {}", h); // Логирование получения запроса
             if let Ok(d) = storage.get(&h).await {
                 let message: Vec<u8> = Message::ContentFilled(h, d).into();
                 let packet = Packet::new(message, addr);
@@ -30,7 +32,7 @@ async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Soc
             }
         }
         Message::ContentFilled(h, d) => {
-            println!("Received data with hash: {}", h); // Логирование хэш-суммы
+            println!("Received data with hash: {}", h); // Логирование получения данных
             storage.save(&h, &d).await.unwrap();
         }
         _ => {}
