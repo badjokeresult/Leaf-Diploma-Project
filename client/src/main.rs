@@ -14,20 +14,20 @@ use args::{load_args, Action};
 
 #[derive(Serialize, Deserialize)]
 struct Metadata {
-    data: Vec<Vec<u8>>,
-    recovery: Vec<Vec<u8>>,
+    data: Vec<String>,
+    recovery: Vec<String>,
 }
 
 impl Metadata {
-    pub fn new(data: Vec<Vec<u8>>, recovery: Vec<Vec<u8>>) -> Metadata {
+    pub fn new(data: Vec<String>, recovery: Vec<String>) -> Metadata {
         Metadata { data, recovery }
     }
 
-    pub fn get_data(&self) -> Vec<Vec<u8>> {
+    pub fn get_data(&self) -> Vec<String> {
         self.data.clone()
     }
 
-    pub fn get_recv(&self) -> Vec<Vec<u8>> {
+    pub fn get_recv(&self) -> Vec<String> {
         self.recovery.clone()
     }
 }
@@ -61,11 +61,12 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let hasher = StreebogHasher::new();
     let (mut data_hash, mut recv_hash) = (vec![], vec![]);
     for c in data.iter_mut() {
-        data_hash.push(hasher.calc_hash_for_chunk(c));
+        data_hash.push(hex::encode(hasher.calc_hash_for_chunk(c)));
     }
     for c in recovery.iter_mut() {
-        recv_hash.push(hasher.calc_hash_for_chunk(c));
+        recv_hash.push(hex::encode(hasher.calc_hash_for_chunk(c)));
     }
+
     let metadata = Metadata::new(data_hash, recv_hash);
 
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
@@ -89,30 +90,31 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-async fn send_chunk(socket: &UdpSocket, hash: &[u8], data: &[u8]) {
-    let req: Vec<u8> = Message::SendingReq(hash.to_vec()).into();
+async fn send_chunk(socket: &UdpSocket, hash: &str, data: &[u8]) {
+    let req: Vec<u8> = Message::SendingReq(hash.to_string()).into();
     socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
     let mut ack = [0u8; 4096];
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
         let ack = Message::from(ack[..sz].to_vec());
         if let Message::SendingAck(h) = ack {
-            if h.iter().eq(hash) {
-                let content: Vec<u8> = Message::ContentFilled(hash.to_vec(), data.to_vec()).into();
+            if h.eq(hash) {
+                let content: Vec<u8> =
+                    Message::ContentFilled(hash.to_string(), data.to_vec()).into();
                 socket.send_to(&content, addr).await.unwrap();
             }
         }
     }
 }
 
-async fn recv_chunk(socket: &UdpSocket, hash: &[u8]) -> Vec<u8> {
-    let req: Vec<u8> = Message::RetrievingReq(hash.to_vec()).into();
+async fn recv_chunk(socket: &UdpSocket, hash: &str) -> Vec<u8> {
+    let req: Vec<u8> = Message::RetrievingReq(hash.to_string()).into();
     socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
     let mut content = [0u8; 4096];
     if let Ok((sz, _)) = socket.recv_from(&mut content).await {
         let content = Message::from(content[..sz].to_vec());
         if let Message::ContentFilled(h, d) = content {
-            if h.iter().eq(hash) {
+            if h.eq(hash) {
                 return d;
             }
         }

@@ -18,16 +18,16 @@ mod consts {
 
 pub trait ServerStorage {
     // Трейт для хранилища сервера
-    async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError>; // Метод для сохранения данных по хэш-сумме на диске
-    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrievingDataError>; // Метод для получения данных из хранилища
+    async fn save(&self, hash: &str, data: &[u8]) -> Result<(), SavingDataError>; // Метод для сохранения данных по хэш-сумме на диске
+    async fn get(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError>; // Метод для получения данных из хранилища
     async fn can_save(&self) -> bool; // Метод для проверки возможности сохранения данных
 }
 
 #[derive(Clone)]
 pub struct UdpServerStorage {
     // Структура хранилища
-    database: Arc<RwLock<HashMap<Box<[u8]>, PathBuf>>>, // Хэш-таблица, хранящая хэш-суммы и пути к файлам на диске, выполненная в атомарном исполнении с внутренней изменяемостью
-    path: PathBuf,                                      // Путь до хранилища
+    database: Arc<RwLock<HashMap<String, PathBuf>>>, // Хэш-таблица, хранящая хэш-суммы и пути к файлам на диске, выполненная в атомарном исполнении с внутренней изменяемостью
+    path: PathBuf,                                   // Путь до хранилища
 }
 
 impl UdpServerStorage {
@@ -62,8 +62,8 @@ impl UdpServerStorage {
 }
 
 impl ServerStorage for UdpServerStorage {
-    async fn save(&self, hash: &[u8], data: &[u8]) -> Result<(), SavingDataError> {
-        let hash: Box<[u8]> = hash.to_vec().into_boxed_slice();
+    async fn save(&self, hash: &str, data: &[u8]) -> Result<(), SavingDataError> {
+        let hash = String::from(hash);
 
         let mut db = self.database.write().await;
 
@@ -86,11 +86,11 @@ impl ServerStorage for UdpServerStorage {
         Ok(())
     }
 
-    async fn get(&self, hash: &[u8]) -> Result<Vec<u8>, RetrievingDataError> {
+    async fn get(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError> {
         for key in self.database.read().await.keys() {
             println!("{:#?}", key);
         }
-        let mut db: RwLockWriteGuard<'_, HashMap<Box<[u8]>, PathBuf>> = self.database.write().await;
+        let mut db: RwLockWriteGuard<'_, HashMap<String, PathBuf>> = self.database.write().await;
         // Метод чтения данных с диска
         if let Some(x) = db.remove(hash) {
             // Если полученный хэш указывает на файл, то удаляем запись из таблицы
