@@ -72,13 +72,13 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     socket.set_broadcast(true).unwrap();
     println!("LEN OF DATA = {}", data.len());
     println!("LEN OF RECV = {}", recovery.len());
+    let data_hashes = metadata.get_data();
+    let recv_hashes = metadata.get_recv();
     for i in 0..data.len() {
-        let data_hashes = metadata.get_data();
         send_chunk(&socket, &data_hashes[i], &data[i]).await;
         println!("DATA CHUNK WITH INDEX {} was sent", i);
     }
     for i in 0..recovery.len() {
-        let recv_hashes = metadata.get_recv();
         send_chunk(&socket, &recv_hashes[i], &recovery[i]).await;
         println!("RECV CHUNK WITH INDEX {} was sent", i);
     }
