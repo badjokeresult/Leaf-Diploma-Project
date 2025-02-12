@@ -12,6 +12,8 @@ use tokio::{fs, net::UdpSocket};
 
 use args::{load_args, Action};
 
+const PASSWORD: &str = "Helloworld";
+
 #[derive(Serialize, Deserialize)]
 struct Metadata {
     data: Vec<String>,
@@ -49,8 +51,7 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let chunks = sharer.split_into_chunks(&content).unwrap();
     let (mut data, mut recovery) = chunks.deconstruct();
 
-    let password = "n0tp3nt3$t";
-    let encryptor = KuznechikEncryptor::new(password).await.unwrap();
+    let encryptor = KuznechikEncryptor::new(PASSWORD).await.unwrap();
     for c in data.iter_mut() {
         encryptor.encrypt_chunk(c).unwrap();
     }
@@ -138,8 +139,7 @@ async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         recv.push(recv_chunk(&socket, h).await);
     }
 
-    let password = "n0tp3nt3$t";
-    let decryptor = KuznechikEncryptor::new(password).await.unwrap();
+    let decryptor = KuznechikEncryptor::new(PASSWORD).await.unwrap();
     for c in data.iter_mut() {
         decryptor.decrypt_chunk(c).unwrap();
     }

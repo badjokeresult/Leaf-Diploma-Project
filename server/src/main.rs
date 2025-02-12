@@ -1,51 +1,39 @@
-use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
-use std::time::Duration; // Зависимость стандартной библиотеки для с простоем потоков
-
-use tokio::fs; // Внешняя зависимость для работы с дисковыми операциями ввода-вывода в асинхронном исполнении
-use tokio::sync::broadcast; // Внешняя зависимость для работы с широковещательными асинхронными каналами
-use tokio::time; // Внешняя зависимость для асинхронной работы с временем
-
-use common::Message; // Зависимость внутренней библиотеки для работы с сообщениями
-
+use common::Message;
 use socket::{Packet, Socket};
-use stor::{ServerStorage, UdpServerStorage}; // Внутренняя зависимость для работы с хранилищем принятых данных // Внутренняя зависимость для работы с UDP-сокетом
+use std::path::PathBuf;
+use std::time::Duration;
+use stor::{ServerStorage, UdpServerStorage};
+use tokio::fs;
+use tokio::sync::broadcast;
+use tokio::time;
 
-mod socket; // Объявление модуля UDP-сокета
-mod stor; // Объявление модуля хранилища
+mod socket;
+mod stor;
 
-async fn process_packet(
-    // Функция для обработки пришедшего сообщени
-    packet: Packet,
-    storage: &UdpServerStorage,
-    socket: &Socket,
-) {
-    time::sleep(Duration::from_millis(100)).await; // Простой для переключения потока
-    let addr = packet.addr; // Получение адреса источника
-    let message = Message::from(packet.data); // Формирование сообщения из двоичных данных
+async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Socket) {
+    time::sleep(Duration::from_millis(100)).await;
+    let addr = packet.addr;
+    let message = Message::from(packet.data);
     match message.clone() {
         Message::SendingReq(h) => {
-            // Если пришел запрос на отправку
             if storage.can_save().await {
-                // Если можно сохранить данные
-                let ack: Vec<u8> = Message::SendingAck(h).into(); // Если текущий размер меньше, формируется подтверждение отправки
-                let packet = Packet::new(ack, addr); // Формирование объекта датаграммы для отправки
-                socket.send(packet).await; // Отправка датаграммы
+                let ack: Vec<u8> = Message::SendingAck(h).into();
+                let packet = Packet::new(ack, addr);
+                socket.send(packet).await;
             }
         }
         Message::RetrievingReq(h) => {
-            // Если пришел запрос на получение
             if let Ok(d) = storage.get(&h).await {
-                // Если данные с такой хэш-суммой представлены в хранилище
                 let message: Vec<u8> = Message::ContentFilled(h, d).into();
                 let packet = Packet::new(message, addr);
                 socket.send(packet).await;
             }
         }
         Message::ContentFilled(h, d) => {
-            // Если сообщение содержит данные
+            println!("Received data with hash: {}", h); // Логирование хэш-суммы
             storage.save(&h, &d).await.unwrap();
         }
-        _ => {} // Если тип сообщения неизвестен, ничего не делаем
+        _ => {}
     }
 }
 
@@ -54,7 +42,6 @@ async fn packet_handler(
     storage: &UdpServerStorage,
     socket: &Socket,
 ) {
-    // Метод обработчика пакетов
     while let Ok(p) = rx.recv().await {
         process_packet(p, storage, socket).await;
     }
@@ -62,31 +49,30 @@ async fn packet_handler(
 
 #[tokio::main]
 async fn main() {
-    let (socket, tx) = Socket::new().await; // Создание объекта сокета
+    let (socket, tx) = Socket::new().await;
 
     #[cfg(windows)]
-    let base_path = PathBuf::from(std::env::var("APPDATA").unwrap()); // Базовый путь для Windows
+    let base_path = PathBuf::from(std::env::var("APPDATA").unwrap());
 
     #[cfg(not(windows))]
-    let base_path = PathBuf::from("/var/local"); // Базовый путь для Linux
+    let base_path = PathBuf::from("/var/local");
 
     let path = base_path.join("leaf").join("chunks");
-    fs::create_dir_all(&path).await.unwrap(); // Создание директории для хранения частей файлов
+    fs::create_dir_all(&path).await.unwrap();
 
-    let storage = UdpServerStorage::new(path); // Создание объекта хранилища
+    let storage = UdpServerStorage::new(path);
 
     for _ in 0..4 {
-        let rx = tx.subscribe(); // Создание нового потребителя канала
-        let socket_clone = socket.clone(); // Клонирование сокета для отправки его в поток
-        let storage_clone = storage.clone(); // Клонирование хранилища для отправки его в поток
+        let rx = tx.subscribe();
+        let socket_clone = socket.clone();
+        let storage_clone = storage.clone();
         tokio::spawn(async move {
-            // Создание асинхронного потока
-            packet_handler(rx, &storage_clone, &socket_clone).await; // Запуск обработчика пакетов в отдельном потоке
+            packet_handler(rx, &storage_clone, &socket_clone).await;
         });
     }
 
     loop {
-        tokio::time::sleep(Duration::from_millis(100)).await; // Запуск бесконечного цикла для продолжения работы основного потока с ожиданием для переключения на другие работающие потоки
+        tokio::time::sleep(Duration::from_millis(100)).await;
         socket.recv().await;
     }
 }
