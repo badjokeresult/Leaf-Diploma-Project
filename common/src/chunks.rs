@@ -132,10 +132,10 @@ impl SecretSharer for ReedSolomonSecretSharer {
             secret.append(&mut value); // Перемещение данных в вектор
         }
 
-        let secret = match secret.iter().position(|x| 0u8.eq(x)) {
-            Some(p) => secret.split_at(p).0.to_vec(),
-            None => secret,
-        }; // Удаление нулей в конце последовательности
+        // let secret = match secret.iter().position(|x| 0u8.eq(x)) {
+        //     Some(p) => secret.split_at(p).0.to_vec(),
+        //     None => secret,
+        // }; // Удаление нулей в конце последовательности
 
         Ok(secret)
     }
