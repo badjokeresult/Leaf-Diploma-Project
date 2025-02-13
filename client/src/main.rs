@@ -138,6 +138,13 @@ async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         recv.push(recv_chunk(&socket, h).await);
     }
 
+    for d in &data {
+        println!("{}", d.len());
+    }
+    for d in &recv {
+        println!("{}", d.len());
+    }
+
     let password = std::env::var("PASSWORD").unwrap();
     let decryptor = KuznechikEncryptor::new(&password).await.unwrap();
     for c in data.iter_mut() {
