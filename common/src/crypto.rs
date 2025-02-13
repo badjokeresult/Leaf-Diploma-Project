@@ -245,11 +245,6 @@ impl Encryptor for KuznechikEncryptor {
             result.extend_from_slice(&block); // Записываем дешифрованные данные в конец общего буфера
         }
 
-        // Remove padding
-        while result.last() == Some(&0) {
-            result.pop(); // Удаляем нулевые байты в конце буфера
-        }
-
         chunk.copy_from_slice(&result); // Записываем новые данные в массив входа
         Ok(())
     }
