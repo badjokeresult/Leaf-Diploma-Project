@@ -48,7 +48,7 @@ pub enum Message {
 impl Into<Vec<u8>> for Message {
     fn into(self) -> Vec<u8> {
         // Метод сериализации сообщения в JSON с последующим кодированием в Base64 для компактной отправки
-        let json = serde_json::to_string_pretty(&self).unwrap(); // Сериализация
+        let json = serde_json::to_vec(&self).unwrap(); // Сериализация
         BASE64_STANDARD.encode(json.as_bytes()).into_bytes() // Кодирование
     }
 }
