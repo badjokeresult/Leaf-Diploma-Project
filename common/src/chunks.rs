@@ -119,7 +119,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
 
         let decoder: ReedSolomon<galois_8::Field> =
             ReedSolomon::new(data_len, recovery_len).unwrap(); // Создание декодера Рида-Соломона
-        decoder.reconstruct_data(&mut full_data).unwrap(); // Восстановление данных из блоков восстановления, если каких-то данных нет
+        decoder.reconstruct(&mut full_data).unwrap(); // Восстановление данных из блоков восстановления, если каких-то данных нет
 
         let content = full_data[..data_len]
             .par_iter()
