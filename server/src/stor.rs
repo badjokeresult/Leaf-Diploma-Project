@@ -1,12 +1,10 @@
 use consts::*;
 use errors::*;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::fs;
-use tokio::sync::{RwLock, RwLockWriteGuard};
 use uuid::Uuid;
 use walkdir::WalkDir;
+use common::{Hasher, StreebogHasher};
 
 mod consts {
     pub const MAX_OCCUPIED_SPACE: usize = 10 * 1024 * 1024 * 1024;
@@ -18,16 +16,17 @@ pub trait ServerStorage {
     async fn can_save(&self) -> bool;
 }
 
-#[derive(Clone)]
 pub struct UdpServerStorage {
-    database: Arc<RwLock<HashMap<String, PathBuf>>>,
+    //database: Arc<RwLock<HashMap<String, PathBuf>>>,
+    hasher: StreebogHasher,
     path: PathBuf,
 }
 
 impl UdpServerStorage {
     pub fn new(path: PathBuf) -> UdpServerStorage {
         UdpServerStorage {
-            database: Arc::new(RwLock::new(HashMap::new())),
+            //database: Arc::new(RwLock::new(HashMap::new())),
+            hasher: StreebogHasher::new(),
             path,
         }
     }
@@ -47,19 +46,33 @@ impl UdpServerStorage {
         }
         Ok(size)
     }
+
+    async fn search_for_hash(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError> {
+        for entry in WalkDir::new(&self.path) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => return Err(RetrievingDataError(format!("{:?}", e))),
+            };
+            if entry.path().is_file() {
+                let content = fs::read(entry.path()).await.unwrap();
+                let h = self.hasher.calc_hash_for_chunk(&content);
+                if hash.eq(&hex::encode(h)) {
+                    return Ok(content);
+                }
+            }
+        }
+        Err(RetrievingDataError(format!("hash not found: {}", hash)))
+    }
 }
 
 impl ServerStorage for UdpServerStorage {
     async fn save(&self, hash: &str, data: &[u8]) -> Result<(), SavingDataError> {
         let hash = String::from(hash);
 
-        let mut db = self.database.write().await;
-
-        if db.contains_key(&hash) {
+        if let Ok(_) = self.search_for_hash(&hash).await {
             println!("Hash already present: {}", hash);
-            return Err(SavingDataError(format!(
-                "Hash already presents file {:#?}",
-                db.get(&hash).unwrap()
+            return Err(SavingDataError(String::from(
+                "Hash already presents file"
             )));
         }
 
@@ -69,18 +82,17 @@ impl ServerStorage for UdpServerStorage {
             .await
             .map_err(|e| SavingDataError(e.to_string()))?;
 
-        db.insert(hash, filename);
+        //db.insert(hash, filename);
         Ok(())
     }
 
     async fn get(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError> {
-        for key in self.database.read().await.keys() {
-            println!("{:#?}", key);
-        }
-        let mut db: RwLockWriteGuard<'_, HashMap<String, PathBuf>> = self.database.write().await;
-        if let Some(x) = db.remove(hash) {
-            let data = fs::read(x).await.unwrap();
-            return Ok(data);
+        // for key in self.database.read().await.keys() {
+        //     println!("{:#?}", key);
+        // }
+        //let mut db: RwLockWriteGuard<'_, HashMap<String, PathBuf>> = self.database.write().await;
+        if let Ok(c) = self.search_for_hash(hash).await {
+            return Ok(c);
         }
         Err(RetrievingDataError(String::from(
             "No data for such hash sum",
