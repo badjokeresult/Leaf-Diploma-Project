@@ -47,7 +47,7 @@ impl UdpServerStorage {
         Ok(size)
     }
 
-    async fn search_for_hash(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError> {
+    async fn search_for_hash(&self, hash: &str) -> Result<(PathBuf, Vec<u8>), RetrievingDataError> {
         for entry in WalkDir::new(&self.path) {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -57,7 +57,7 @@ impl UdpServerStorage {
                 let content = fs::read(entry.path()).await.unwrap();
                 let h = self.hasher.calc_hash_for_chunk(&content);
                 if hash.eq(&hex::encode(h)) {
-                    return Ok(content);
+                    return Ok((PathBuf::from(entry.path()), content));
                 }
             }
         }
@@ -78,7 +78,7 @@ impl ServerStorage for UdpServerStorage {
 
         let filename = self.path.join(format!("{}.bin", Uuid::new_v4()));
         println!("Saving file with hash: {}", hash);
-        tokio::fs::write(&filename, data)
+        fs::write(&filename, data)
             .await
             .map_err(|e| SavingDataError(e.to_string()))?;
 
@@ -91,7 +91,8 @@ impl ServerStorage for UdpServerStorage {
         //     println!("{:#?}", key);
         // }
         //let mut db: RwLockWriteGuard<'_, HashMap<String, PathBuf>> = self.database.write().await;
-        if let Ok(c) = self.search_for_hash(hash).await {
+        if let Ok((p, c)) = self.search_for_hash(hash).await {
+            fs::remove_file(&p).await.unwrap();
             return Ok(c);
         }
         Err(RetrievingDataError(String::from(
