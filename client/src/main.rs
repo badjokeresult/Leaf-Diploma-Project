@@ -154,9 +154,10 @@ async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         decryptor.decrypt_chunk(c).unwrap();
     }
 
-    let chunks = ReedSolomonChunks::new(data, recv);
-    let sharer = ReedSolomonSecretSharer::new().unwrap();
-    let final_content = sharer.recover_from_chunks(chunks).unwrap();
+    // let chunks = ReedSolomonChunks::new(data, recv);
+    // let sharer = ReedSolomonSecretSharer::new().unwrap();
+    // let final_content = sharer.recover_from_chunks(chunks).unwrap();
+    let final_content = data.iter().flatten().cloned().collect::<Vec<u8>>();
     fs::write(filepath, final_content).await.unwrap();
     Ok(())
 }
