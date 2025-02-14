@@ -103,8 +103,8 @@ impl SecretSharer for ReedSolomonSecretSharer {
 
         let mut parity = vec![vec![0u8; block_size]; blocks.len()];
         encoder.encode_sep(&blocks, &mut parity).unwrap(); // Создание блоков восстановления при помощи кодировщика
-        let (data, recovery) = blocks.split_at(blocks.len() / 2);
-        Ok(ReedSolomonChunks::new(data.to_vec(), recovery.to_vec()))
+        //let (data, recovery) = (blocks, parity);
+        Ok(ReedSolomonChunks::new(blocks, parity))
     }
 
     fn recover_from_chunks(
