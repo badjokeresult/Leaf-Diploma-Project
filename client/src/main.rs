@@ -58,6 +58,9 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         encryptor.encrypt_chunk(c).unwrap();
     }
 
+    println!("{} -> {}", data.len(), data.first().unwrap().len());
+    println!("{} -> {}", recovery.len(), recovery.first().unwrap().len());
+
     let hasher = StreebogHasher::new();
     let (mut data_hash, mut recv_hash) = (vec![], vec![]);
     for c in data.iter_mut() {

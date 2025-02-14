@@ -101,7 +101,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
             blocks.push(chunk); // Заполнение основного буфера
         }
 
-        let mut parity = vec![vec![0u8; block_size]; blocks.len()];
+        let mut parity = vec![vec![0u8; block_size]; amount_of_recovers];
         encoder.encode_sep(&blocks, &mut parity).unwrap(); // Создание блоков восстановления при помощи кодировщика
         //let (data, recovery) = (blocks, parity);
         Ok(ReedSolomonChunks::new(blocks, parity))
@@ -132,10 +132,10 @@ impl SecretSharer for ReedSolomonSecretSharer {
             secret.append(&mut value); // Перемещение данных в вектор
         }
 
-        // let secret = match secret.iter().position(|x| 0u8.eq(x)) {
-        //     Some(p) => secret.split_at(p).0.to_vec(),
-        //     None => secret,
-        // }; // Удаление нулей в конце последовательности
+        let secret = match secret.iter().position(|x| 0u8.eq(x)) {
+            Some(p) => secret.split_at(p).0.to_vec(),
+            None => secret,
+        }; // Удаление нулей в конце последовательности
 
         Ok(secret)
     }
