@@ -1,7 +1,6 @@
 use common::Message;
 use socket::{Packet, Socket};
 use std::path::PathBuf;
-use std::time::Duration;
 use stor::{ServerStorage, UdpServerStorage};
 use tokio::fs;
 use tokio::sync::mpsc::{channel, Receiver};
@@ -66,7 +65,6 @@ async fn main() {
     });
 
     loop {
-        tokio::time::sleep(Duration::from_millis(100)).await;
         socket.recv(&tx).await;
     }
 }
