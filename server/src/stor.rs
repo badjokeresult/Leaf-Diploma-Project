@@ -1,10 +1,10 @@
+use common::{Hasher, StreebogHasher};
 use consts::*;
 use errors::*;
 use std::path::PathBuf;
 use tokio::fs;
 use uuid::Uuid;
 use walkdir::WalkDir;
-use common::{Hasher, StreebogHasher};
 
 mod consts {
     pub const MAX_OCCUPIED_SPACE: usize = 10 * 1024 * 1024 * 1024;
@@ -56,7 +56,7 @@ impl UdpServerStorage {
             if entry.path().is_file() {
                 let content = fs::read(entry.path()).await.unwrap();
                 let h = self.hasher.calc_hash_for_chunk(&content);
-                if hash.eq(&hex::encode(h)) {
+                if hash.eq(&h) {
                     return Ok((PathBuf::from(entry.path()), content));
                 }
             }
@@ -71,9 +71,7 @@ impl ServerStorage for UdpServerStorage {
 
         if let Ok(_) = self.search_for_hash(&hash).await {
             println!("Hash already present: {}", hash);
-            return Err(SavingDataError(String::from(
-                "Hash already presents file"
-            )));
+            return Err(SavingDataError(String::from("Hash already presents file")));
         }
 
         let filename = self.path.join(format!("{}.bin", Uuid::new_v4()));

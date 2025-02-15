@@ -8,7 +8,6 @@ uuid = { version = "1.12.0", features = ["v4", "rng"] }
 tokio = { workspace = true }
 common = { path = "../common" }
 walkdir = "2.5.0"
-hex = { workspace = true }
 
 [[bin]]
 name = "server"

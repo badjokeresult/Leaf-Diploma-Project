@@ -252,7 +252,7 @@ impl Encryptor for KuznechikEncryptor {
 
 pub trait Hasher {
     // Трейт для структур, реализующий вычисление хэш-суммы
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Vec<u8>; // Метод вычисления хэш-суммы
+    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> String; // Метод вычисления хэш-суммы
 }
 
 pub struct StreebogHasher; // Структура для вычисления хэш-суммы
@@ -266,13 +266,13 @@ impl StreebogHasher {
 
 impl Hasher for StreebogHasher {
     // Реализация трейта
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> Vec<u8> {
+    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> String {
         // Метод вычисления хэш-суммы
         let mut hasher = streebog::Streebog256::new(); // Создаем новый объект хэшера
         Update::update(&mut hasher, chunk); // Передаем хэшеру данные для вычисления
         let hash = hasher.clone().finalize(); // Вычисляем хэш-сумму для отданных данных
         let hash = hash.to_vec(); // Возвращаем как вектор
-        hash
+        hex::encode(hash)
     }
 }
 

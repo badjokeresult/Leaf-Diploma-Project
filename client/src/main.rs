@@ -1,5 +1,3 @@
-mod args;
-
 use std::path::PathBuf;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -10,7 +8,37 @@ use common::{
 use serde::{Deserialize, Serialize};
 use tokio::{fs, net::UdpSocket};
 
-use args::{load_args, Action};
+use clap::Parser;
+use clap_derive::{Parser, ValueEnum};
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct Args {
+    #[arg(value_enum, short, long)]
+    action: Action,
+    #[arg(short, long)]
+    file: String,
+}
+
+impl Args {
+    pub fn get_action(&self) -> Action {
+        self.action
+    }
+
+    pub fn get_file(&self) -> PathBuf {
+        PathBuf::from(&self.file)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, ValueEnum)]
+pub enum Action {
+    Send,
+    Receive,
+}
+
+pub fn load_args() -> Args {
+    Args::parse()
+}
 
 #[derive(Serialize, Deserialize)]
 struct Metadata {
@@ -64,10 +92,10 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let hasher = StreebogHasher::new();
     let (mut data_hash, mut recv_hash) = (vec![], vec![]);
     for c in data.iter_mut() {
-        data_hash.push(hex::encode(hasher.calc_hash_for_chunk(c)));
+        data_hash.push(hasher.calc_hash_for_chunk(c));
     }
     for c in recovery.iter_mut() {
-        recv_hash.push(hex::encode(hasher.calc_hash_for_chunk(c)));
+        recv_hash.push(hasher.calc_hash_for_chunk(c));
     }
 
     let metadata = Metadata::new(data_hash, recv_hash);
