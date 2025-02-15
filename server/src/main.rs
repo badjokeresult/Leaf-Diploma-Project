@@ -18,6 +18,7 @@ async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Soc
                 let ack: Vec<u8> = Message::SendingAck(h).into();
                 let packet = Packet::new(ack, addr);
                 socket.send(packet).await;
+                println!("Sending SendingAck to {}", addr);
             }
         }
         Message::RetrievingReq(h) => {

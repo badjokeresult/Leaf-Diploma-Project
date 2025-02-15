@@ -128,6 +128,7 @@ async fn send_chunk(socket: &UdpSocket, hash: &str, data: &[u8]) {
         let ack = Message::from(ack[..sz].to_vec());
         if let Message::SendingAck(h) = ack {
             if h.eq(hash) {
+                println!("Received SendingAck from {}", addr);
                 let content: Vec<u8> =
                     Message::ContentFilled(hash.to_string(), data.to_vec()).into();
                 socket.send_to(&content, addr).await.unwrap();
