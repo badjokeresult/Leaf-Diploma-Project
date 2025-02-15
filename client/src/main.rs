@@ -77,7 +77,6 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let data_hashes = metadata.get_data();
     let recv_hashes = metadata.get_recv();
     for i in 0..data.len() {
-        println!("{:?} = {:?}", &data_hashes[i], &data[i]);
         send_chunk(&socket, &data_hashes[i], &data[i]).await;
         println!("DATA CHUNK WITH INDEX {} was sent", i);
     }
@@ -97,7 +96,6 @@ async fn send_chunk(socket: &UdpSocket, hash: &str, data: &[u8]) {
     let req: Vec<u8> = Message::SendingReq(hash.to_string()).into();
     socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
     let mut ack = [0u8; 4096];
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
         let ack = Message::from(ack[..sz].to_vec());
         if let Message::SendingAck(h) = ack {
