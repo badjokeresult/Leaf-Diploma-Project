@@ -10,8 +10,8 @@ mod socket;
 mod stor;
 
 async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Socket) {
-    let addr = packet.addr;
-    let message = Message::from(packet.data);
+    let (data, addr) = packet.deconstruct();
+    let message = Message::from(data);
     match message.clone() {
         Message::SendingReq(h) => {
             println!("Received SendingReq with hash: {}", h); // Логирование получения запроса
