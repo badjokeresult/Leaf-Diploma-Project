@@ -5,13 +5,11 @@ use std::time::Duration;
 use stor::{ServerStorage, UdpServerStorage};
 use tokio::fs;
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::time;
 
 mod socket;
 mod stor;
 
 async fn process_packet(packet: Packet, storage: &UdpServerStorage, socket: &Socket) {
-    time::sleep(Duration::from_millis(100)).await;
     let addr = packet.addr;
     let message = Message::from(packet.data);
     match message.clone() {
