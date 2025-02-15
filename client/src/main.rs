@@ -124,7 +124,7 @@ async fn send_chunk(socket: &UdpSocket, hash: &str, data: &[u8]) {
     let req: Vec<u8> = Message::SendingReq(hash.to_string()).into();
     socket.send_to(&req, "255.255.255.255:62092").await.unwrap();
     let mut ack = [0u8; 4096];
-    if let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
+    while let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
         let ack = Message::from(ack[..sz].to_vec());
         if let Message::SendingAck(h) = ack {
             if h.eq(hash) {
@@ -132,6 +132,7 @@ async fn send_chunk(socket: &UdpSocket, hash: &str, data: &[u8]) {
                 let content: Vec<u8> =
                     Message::ContentFilled(hash.to_string(), data.to_vec()).into();
                 socket.send_to(&content, addr).await.unwrap();
+                return;
             }
         }
     }
