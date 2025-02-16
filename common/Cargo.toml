@@ -12,9 +12,9 @@ kuznyechik = "0.8.2"
 streebog = "0.10.2"
 argon2 = "0.5.3"
 reed-solomon-erasure = "6.0.0"
-rayon = "1.10.0"
 tokio = { workspace = true }
 hex = "0.4.3"
+rayon = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59.0", features = [

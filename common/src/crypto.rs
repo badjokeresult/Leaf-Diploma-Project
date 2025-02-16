@@ -21,14 +21,23 @@ use consts::*;
 use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок // Внутренняя зависимость модуля констант
 
 mod consts {
-    #[cfg(target_os = "linux")]
+    #[cfg(not(windows))]
     pub const USERNAME_ENV_VAR: &str = "USER";
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(windows))]
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     pub const USERNAME_ENV_VAR: &str = "USERNAME";
+
+    #[cfg(windows)]
+    pub const CONFIG_ROOT: &str = "APPDATA";
+
+    #[cfg(not(windows))]
+    pub const CONFIG_ROOT: &str = "/etc";
+
+    pub const APP_DIR: &str = "leaf";
+    pub const METADATA_PATH: &str = "metadata.bin";
 }
 
 #[derive(Serialize, Deserialize)] // Использование сериализации и десериализации для данной структуры
@@ -40,8 +49,8 @@ struct EncryptionMetadata {
 
 pub trait Encryptor {
     // Трейт для структур, реализующих шифрование
-    fn encrypt_chunk(&self, chunk: &mut [u8]) -> Result<(), EncryptionError>; // Прототип метода шифрования массива данных
-    fn decrypt_chunk(&self, chunk: &mut [u8]) -> Result<(), DecryptionError>; // Прототип метода дешифрования массива данных
+    fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8>; // Прототип метода шифрования массива данных
+    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DecryptionError>; // Прототип метода дешифрования массива данных
 }
 
 pub struct KuznechikEncryptor {
@@ -52,7 +61,7 @@ pub struct KuznechikEncryptor {
 }
 
 impl KuznechikEncryptor {
-    #[cfg(target_os = "linux")]
+    #[cfg(not(windows))]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
         let username =
@@ -69,7 +78,7 @@ impl KuznechikEncryptor {
         }
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
         // Конструктор, получающая на вход строку с паролем (реализация для Windows)
         // Загружаем необходимые зависимости
@@ -158,20 +167,20 @@ impl KuznechikEncryptor {
 
     async fn get_metadata_path() -> Result<PathBuf, InitializationError> {
         // Метод получения пути файла с метаданными
-        #[cfg(target_os = "linux")]
-        let base_path = PathBuf::from("/etc"); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
+        #[cfg(not(windows))]
+        let base_path = PathBuf::from(CONFIG_ROOT); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
 
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         let base_path =
-            PathBuf::from(env::var("APPDATA").map_err(|e| InitializationError(e.to_string()))?); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
+            PathBuf::from(env::var(CONFIG_ROOT).map_err(|e| InitializationError(e.to_string()))?); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
 
         // Создаем директорию нашего приложения
-        let app_dir = base_path.join("leaf");
+        let app_dir = base_path.join(APP_DIR);
         fs::create_dir_all(&app_dir)
             .await
             .map_err(|e| InitializationError(e.to_string()))?;
 
-        Ok(app_dir.join("metadata.json")) // Возвращаем полный путь до файла с метаданными
+        Ok(app_dir.join(METADATA_PATH)) // Возвращаем полный путь до файла с метаданными
     }
 
     async fn load_metadata(path: &PathBuf) -> Result<EncryptionMetadata, InitializationError> {
@@ -220,7 +229,7 @@ impl KuznechikEncryptor {
 
 impl Encryptor for KuznechikEncryptor {
     // Блок реализации трейта для структуры
-    fn encrypt_chunk(&self, chunk: &mut [u8]) -> Result<(), EncryptionError> {
+    fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8> {
         // Метод шифрования данных на месте
         let mut padded_data = chunk.to_vec(); // Копируем данные в новую переменную
         while padded_data.len() % 16 != 0 {
@@ -244,11 +253,10 @@ impl Encryptor for KuznechikEncryptor {
             result.extend_from_slice(&block); // Записываем защифрованные данные в конец результирующего буфера
         }
 
-        chunk.copy_from_slice(&result); // Заполняем массив со входа новыми данными
-        Ok(())
+        result
     }
 
-    fn decrypt_chunk(&self, chunk: &mut [u8]) -> Result<(), DecryptionError> {
+    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DecryptionError> {
         // Метод дешифрования данных на месте
         // Если данные не выравнены по 16 байт, то возвращаем ошибку
         if chunk.len() % 16 != 0 {
@@ -274,8 +282,7 @@ impl Encryptor for KuznechikEncryptor {
             result.extend_from_slice(&block); // Записываем дешифрованные данные в конец общего буфера
         }
 
-        chunk.copy_from_slice(&result); // Записываем новые данные в массив входа
-        Ok(())
+        Ok(result)
     }
 }
 
@@ -309,18 +316,6 @@ mod errors {
     // Внутренний модуль для собственных типов ошибок
     use std::error::Error;
     use std::fmt; // Зависимость стандартной библиотеки для отображения данных на экране
-
-    #[derive(Debug, Clone)]
-    pub struct EncryptionError(pub String); // Ошибка шифрования данных
-
-    impl fmt::Display for EncryptionError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            // Метод отображения сведений об ошибке на экране
-            write!(f, "Error during encryption chunk: {}", self.0)
-        }
-    }
-
-    impl Error for EncryptionError {}
 
     #[derive(Debug, Clone)]
     pub struct DecryptionError(pub String); // Ошибка дешифрования данных
