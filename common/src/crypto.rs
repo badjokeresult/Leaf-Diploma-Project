@@ -42,24 +42,28 @@ pub struct KuznechikEncryptor {
 impl KuznechikEncryptor {
     #[cfg(target_os = "linux")]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
-        // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Linux)
-        let username = env::var("USER").unwrap(); // Получаем имя текущего пользователя из переменной среды
-        let mut pam_client = pam::Client::with_password("system-auth").unwrap(); // Получаем экземпляр PAM-аутентификатора
-        pam_client
-            .conversation_mut()
-            .set_credentials(&username, password); // Отдаем аутентификатору имя пользователя и пароль
-
-        if let Err(e) = pam_client.authenticate() {
-            // Проверяем правильность введенных данных
-            return Err(InitializationError(e.to_string())); // Если аутентификация провалена, возвращаем ошибку
+        // Конструктор, получающий на вход строку с паролем (реализация для Linux)
+        let username = match env::var("USER") {
+            Ok(v) => v,
+            Err(e) => return Err(InitializationError(e.to_string())),
+        }; // Получаем имя текущего пользователя из переменной среды
+        match pam::Client::with_password("system-auth") {
+            // Запускаем аутентификацию при помощи PAM
+            Ok(mut c) => {
+                c.conversation_mut().set_credentials(&username, password); // Отправка логина и пароля аутентификатору
+                match c.authenticate() {
+                    // Если аутентификация успешна
+                    Ok(_) => Self::initialize(password).await, // Запускаем метод инициализации пароля
+                    Err(e) => Err(InitializationError(e.to_string())), // Иначе возврат ошибки
+                }
+            }
+            Err(e) => Err(InitializationError(e.to_string())), // В случае ошибки запуска аутентификации возвращаем ошибку
         }
-
-        Self::initialize(password).await // Запускаем метод инициализации ключа и гаммы
     }
 
     #[cfg(target_os = "windows")]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
-        // Метод создания нового экземпляра структуры, получающая на вход строку с паролем (реализация для Windows)
+        // Конструктор, получающая на вход строку с паролем (реализация для Windows)
         // Загружаем необходимые зависимости
         use windows_sys::Win32::Security::LogonUserW;
         use windows_sys::Win32::Security::LOGON32_LOGON_INTERACTIVE;
@@ -67,7 +71,10 @@ impl KuznechikEncryptor {
 
         use std::ptr::null_mut;
 
-        let username = env::var("USERNAME").unwrap(); // Получаем имя текущего пользователя при помощи переменной среды
+        let username = match env::var("USERNAME") {
+            Ok(v) => v,
+            Err(e) => return Err(InitializationError(e.to_string())),
+        }; // Получаем имя текущего пользователя при помощи переменной среды
         let mut token_handle = null_mut(); // Создаем пустой указатель для токена авторизации
 
         let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя пользователя в кодировке UTF-16
@@ -75,7 +82,7 @@ impl KuznechikEncryptor {
         let domain_wide: Vec<u16> = ".".encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя домена в кодировке UTF-16
 
         // Выполняем проверку правильности введенных данных
-        let result = unsafe {
+        if unsafe {
             LogonUserW(
                 username_wide.as_ptr(),
                 domain_wide.as_ptr(),
@@ -84,9 +91,8 @@ impl KuznechikEncryptor {
                 LOGON32_PROVIDER_DEFAULT,
                 &mut token_handle,
             )
-        };
-
-        if result != 0 {
+        } != 0
+        {
             return Err(InitializationError(String::from("Invalid password"))); // Если данные неверны - возвращаем ошибку
         }
 
@@ -105,8 +111,14 @@ impl KuznechikEncryptor {
             // Если файл с метаданными существует, то читаем данные из него и идем дальше
             let metadata: EncryptionMetadata = Self::load_metadata(&metadata_path).await?;
             (
-                BASE64.decode(&metadata.gamma).unwrap(),
-                BASE64.decode(&metadata.salt).unwrap(),
+                match BASE64.decode(&metadata.gamma) {
+                    Ok(v) => v,
+                    Err(e) => return Err(InitializationError(e.to_string())),
+                },
+                match BASE64.decode(&metadata.salt) {
+                    Ok(v) => v,
+                    Err(e) => return Err(InitializationError(e.to_string())),
+                },
             )
         } else {
             // Если такого файла нет, то создаем новые гамму и соль
@@ -126,9 +138,10 @@ impl KuznechikEncryptor {
 
         let config = Argon2::default(); // Создание конфигурации для создания ключа шифрования
         let mut key = vec![0u8; 32]; // Создаем буфер для ключа
-        config
-            .hash_password_into(password.as_bytes(), &salt, &mut key)
-            .unwrap(); // Создаем ключ и записываем его в буфер
+        match config.hash_password_into(password.as_bytes(), &salt, &mut key) {
+            Ok(_) => {}
+            Err(e) => return Err(InitializationError(e.to_string())),
+        }; // Создаем ключ и записываем его в буфер
 
         let cipher_key = Key::from_slice(&key); // Создаем объект ключа шифрования из буфера
         let cipher = Kuznyechik::new(&cipher_key); // Создаем объект шифратора
@@ -146,19 +159,33 @@ impl KuznechikEncryptor {
         let base_path = PathBuf::from("/etc"); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
 
         #[cfg(target_os = "windows")]
-        let base_path = PathBuf::from(env::var("APPDATA").unwrap()); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
+        let base_path = PathBuf::from(match env::var("APPDATA") {
+            Ok(v) => v,
+            Err(e) => return Err(InitializationError(e.to_string())),
+        }); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
 
         // Создаем директорию нашего приложения
         let app_dir = base_path.join("leaf");
-        fs::create_dir_all(&app_dir).await.unwrap();
+        match fs::create_dir_all(&app_dir).await {
+            Ok(_) => {}
+            Err(e) => return Err(InitializationError(e.to_string())),
+        };
 
         Ok(app_dir.join("metadata.json")) // Возвращаем полный путь до файла с метаданными
     }
 
     async fn load_metadata(path: &PathBuf) -> Result<EncryptionMetadata, InitializationError> {
         // Метод получения данных из файла метаданных
-        let data = fs::read_to_string(path).await.unwrap(); // Получаем строковые данные из файла
-        Ok(serde_json::from_str(&data).unwrap()) // Десериализуем прочитанный JSON-текст в структуру и возвращаем его
+        Ok(
+            match serde_json::from_slice(&match fs::read(path).await {
+                // Получаем строковые данные из файла
+                Ok(c) => c,
+                Err(e) => return Err(InitializationError(e.to_string())),
+            }) {
+                Ok(o) => o,
+                Err(e) => return Err(InitializationError(e.to_string())),
+            },
+        ) // Десериализуем прочитанный JSON-текст в структуру и возвращаем его
     }
 
     async fn save_metadata(
@@ -166,9 +193,19 @@ impl KuznechikEncryptor {
         metadata: &EncryptionMetadata,
     ) -> Result<(), InitializationError> {
         // Метод записи данных в файл метаданных
-        let data = serde_json::to_string_pretty(metadata).unwrap(); // Сериализуем объект в JSON-текст с пробельными символами
-        fs::write(path, data).await.unwrap(); // Записываем текст в файл
-        Ok(())
+        match fs::write(
+            path,
+            match serde_json::to_vec(metadata) {
+                // Сериализуем объект в JSON-текст с пробельными символами
+                Ok(d) => d,
+                Err(e) => return Err(InitializationError(e.to_string())),
+            },
+        )
+        .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => return Err(InitializationError(e.to_string())),
+        } // Записываем текст в файл
     }
 
     pub async fn regenerate_gamma(&mut self) -> Result<(), GammaRegenerationError> {
@@ -177,15 +214,19 @@ impl KuznechikEncryptor {
 
         let metadata = EncryptionMetadata {
             gamma: BASE64.encode(&self.gamma).into_bytes(),
-            salt: BASE64
-                .decode(&Self::load_metadata(&self.metadata_path).await.unwrap().salt)
-                .unwrap(),
+            salt: match BASE64.decode(match Self::load_metadata(&self.metadata_path).await {
+                Ok(m) => m.salt,
+                Err(e) => return Err(GammaRegenerationError(e.to_string())),
+            }) {
+                Ok(s) => s,
+                Err(e) => return Err(GammaRegenerationError(e.to_string())),
+            },
         }; // Создается новый экземпляр структуры метаданных, все поля предварительно кодируются в Base64
 
-        Self::save_metadata(&self.metadata_path, &metadata)
-            .await
-            .unwrap(); // Сохраняем новые метаданные
-        Ok(())
+        match Self::save_metadata(&self.metadata_path, &metadata).await {
+            Ok(_) => Ok(()),
+            Err(e) => return Err(GammaRegenerationError(e.to_string())),
+        } // Сохраняем новые метаданные
     }
 }
 
@@ -259,7 +300,7 @@ pub struct StreebogHasher; // Структура для вычисления х�
 
 impl StreebogHasher {
     pub fn new() -> StreebogHasher {
-        // Метод создания нового экземпляра структуры
+        // Конструктор
         StreebogHasher {}
     }
 }
@@ -271,8 +312,8 @@ impl Hasher for StreebogHasher {
         let mut hasher = streebog::Streebog256::new(); // Создаем новый объект хэшера
         Update::update(&mut hasher, chunk); // Передаем хэшеру данные для вычисления
         let hash = hasher.clone().finalize(); // Вычисляем хэш-сумму для отданных данных
-        let hash = hash.to_vec(); // Возвращаем как вектор
-        hex::encode(hash)
+        let hash = hash.to_vec(); // Переводим в тип вектора
+        hex::encode(hash) // Перевод вектора в шестнадцатеричную строку
     }
 }
 
