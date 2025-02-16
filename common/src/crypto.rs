@@ -319,6 +319,7 @@ impl Hasher for StreebogHasher {
 
 mod errors {
     // Внутренний модуль для собственных типов ошибок
+    use std::error::Error;
     use std::fmt; // Зависимость стандартной библиотеки для отображения данных на экране
 
     #[derive(Debug, Clone)]
@@ -331,6 +332,8 @@ mod errors {
         }
     }
 
+    impl Error for EncryptionError {}
+
     #[derive(Debug, Clone)]
     pub struct DecryptionError(pub String); // Ошибка дешифрования данных
 
@@ -340,6 +343,8 @@ mod errors {
             write!(f, "Error during decryption chunk: {}", self.0)
         }
     }
+
+    impl Error for DecryptionError {}
 
     #[derive(Debug, Clone)]
     pub struct InitializationError(pub String); // Ошибка инициализации структуры
@@ -351,6 +356,8 @@ mod errors {
         }
     }
 
+    impl Error for InitializationError {}
+
     #[derive(Debug, Clone)]
     pub struct GammaRegenerationError(pub String); // Ошибка регенерации гаммы
 
@@ -360,4 +367,6 @@ mod errors {
             write!(f, "Error during gamma regeneration: {}", self.0)
         }
     }
+
+    impl Error for GammaRegenerationError {}
 }

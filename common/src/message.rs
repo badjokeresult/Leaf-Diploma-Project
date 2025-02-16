@@ -41,6 +41,7 @@ impl Message {
 
 mod errors {
     // Модуль с составными типами ошибок
+    use std::error::Error;
     use std::fmt; // Зависимость стандартной библиотеки
 
     #[derive(Debug, Clone)]
@@ -52,6 +53,8 @@ mod errors {
         }
     }
 
+    impl Error for IntoBytesCastError {}
+
     #[derive(Debug, Clone)]
     pub struct FromBytesCastError(pub String); // Тип ошибка перевода вектора в сообщение
 
@@ -60,4 +63,6 @@ mod errors {
             write!(f, "Error casting from bytes slice: {}", self.0)
         }
     }
+
+    impl Error for FromBytesCastError {}
 }

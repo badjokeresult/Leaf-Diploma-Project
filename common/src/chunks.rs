@@ -135,6 +135,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
 
 mod errors {
     // Модуль с ошибками
+    use std::error::Error;
     use std::fmt;
     use std::fmt::Formatter;
 
@@ -152,6 +153,8 @@ mod errors {
         }
     }
 
+    impl Error for DataSplittingError {}
+
     #[derive(Debug, Clone)]
     pub struct DataRecoveringError(pub String); // Тип ошибки восстановления файла
 
@@ -162,6 +165,8 @@ mod errors {
         }
     }
 
+    impl Error for DataRecoveringError {}
+
     #[derive(Debug, Clone)]
     pub struct InitializationError(pub String); // Тип ошибки инициализации структуры разбиения файла
 
@@ -171,6 +176,8 @@ mod errors {
             write!(f, "Error initializing data: {}", self.0)
         }
     }
+
+    impl Error for InitializationError {}
 }
 
 #[cfg(test)]
