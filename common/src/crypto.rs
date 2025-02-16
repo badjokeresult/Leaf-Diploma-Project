@@ -12,12 +12,24 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _}; // Вн�
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации структур
 
 use kuznyechik::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
-use kuznyechik::{Block, Key, Kuznyechik}; // Внешние зависимости для работы с симметричным шифром "Кузнечик (ГОСТ Р 34.12-2018)"
+use kuznyechik::{Block, Key, Kuznyechik}; // Внешние зависимости для работы с симметричным шифром "Кузнечик (ГОСТ Р 34.12-2015)"
 
 use streebog::digest::Update;
 use streebog::Digest; // Внешние зависимости для работы с алгоритмом вычисления хэш-сумм "Стрибог" (ГОСТ Р 34.11-2012)
 
-use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок
+use consts::*;
+use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок // Внутренняя зависимость модуля констант
+
+mod consts {
+    #[cfg(target_os = "linux")]
+    pub const USERNAME_ENV_VAR: &str = "USER";
+
+    #[cfg(target_os = "linux")]
+    pub const PAM_SERVICE_NAME: &str = "system-auth";
+
+    #[cfg(target_os = "windows")]
+    pub const USERNAME_ENV_VAR: &str = "USERNAME";
+}
 
 #[derive(Serialize, Deserialize)] // Использование сериализации и десериализации для данной структуры
 struct EncryptionMetadata {
@@ -33,7 +45,7 @@ pub trait Encryptor {
 }
 
 pub struct KuznechikEncryptor {
-    // Структура, реализующая шифрование по ГОСТ Р 34.12-2018 "Кузнечик"
+    // Структура, реализующая шифрование по ГОСТ Р 34.12-2015 "Кузнечик"
     cipher: Kuznyechik,     // Ключ шифрования
     gamma: Vec<u8>,         // Гамма для шифрования
     metadata_path: PathBuf, // Путь к файлу с метаданными
@@ -43,19 +55,15 @@ impl KuznechikEncryptor {
     #[cfg(target_os = "linux")]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
-        let username = match env::var("USER") {
-            Ok(v) => v,
-            Err(e) => return Err(InitializationError(e.to_string())),
-        }; // Получаем имя текущего пользователя из переменной среды
-        match pam::Client::with_password("system-auth") {
+        let username =
+            env::var(USERNAME_ENV_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя из переменной среды
+        match pam::Client::with_password(PAM_SERVICE_NAME) {
             // Запускаем аутентификацию при помощи PAM
             Ok(mut c) => {
                 c.conversation_mut().set_credentials(&username, password); // Отправка логина и пароля аутентификатору
-                match c.authenticate() {
-                    // Если аутентификация успешна
-                    Ok(_) => Self::initialize(password).await, // Запускаем метод инициализации пароля
-                    Err(e) => Err(InitializationError(e.to_string())), // Иначе возврат ошибки
-                }
+                c.authenticate()
+                    .map_err(|e| InitializationError(e.to_string()))?;
+                Self::initialize(password).await
             }
             Err(e) => Err(InitializationError(e.to_string())), // В случае ошибки запуска аутентификации возвращаем ошибку
         }
@@ -71,10 +79,8 @@ impl KuznechikEncryptor {
 
         use std::ptr::null_mut;
 
-        let username = match env::var("USERNAME") {
-            Ok(v) => v,
-            Err(e) => return Err(InitializationError(e.to_string())),
-        }; // Получаем имя текущего пользователя при помощи переменной среды
+        let username =
+            env::var(USERNAME_ENV_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя при помощи переменной среды
         let mut token_handle = null_mut(); // Создаем пустой указатель для токена авторизации
 
         let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя пользователя в кодировке UTF-16
@@ -111,14 +117,12 @@ impl KuznechikEncryptor {
             // Если файл с метаданными существует, то читаем данные из него и идем дальше
             let metadata: EncryptionMetadata = Self::load_metadata(&metadata_path).await?;
             (
-                match BASE64.decode(&metadata.gamma) {
-                    Ok(v) => v,
-                    Err(e) => return Err(InitializationError(e.to_string())),
-                },
-                match BASE64.decode(&metadata.salt) {
-                    Ok(v) => v,
-                    Err(e) => return Err(InitializationError(e.to_string())),
-                },
+                BASE64
+                    .decode(&metadata.gamma)
+                    .map_err(|e| InitializationError(e.to_string()))?,
+                BASE64
+                    .decode(&metadata.salt)
+                    .map_err(|e| InitializationError(e.to_string()))?,
             )
         } else {
             // Если такого файла нет, то создаем новые гамму и соль
@@ -138,10 +142,9 @@ impl KuznechikEncryptor {
 
         let config = Argon2::default(); // Создание конфигурации для создания ключа шифрования
         let mut key = vec![0u8; 32]; // Создаем буфер для ключа
-        match config.hash_password_into(password.as_bytes(), &salt, &mut key) {
-            Ok(_) => {}
-            Err(e) => return Err(InitializationError(e.to_string())),
-        }; // Создаем ключ и записываем его в буфер
+        config
+            .hash_password_into(password.as_bytes(), &salt, &mut key)
+            .map_err(|e| InitializationError(e.to_string()))?; // Создаем ключ и записываем его в буфер
 
         let cipher_key = Key::from_slice(&key); // Создаем объект ключа шифрования из буфера
         let cipher = Kuznyechik::new(&cipher_key); // Создаем объект шифратора
@@ -159,33 +162,26 @@ impl KuznechikEncryptor {
         let base_path = PathBuf::from("/etc"); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
 
         #[cfg(target_os = "windows")]
-        let base_path = PathBuf::from(match env::var("APPDATA") {
-            Ok(v) => v,
-            Err(e) => return Err(InitializationError(e.to_string())),
-        }); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
+        let base_path =
+            PathBuf::from(env::var("APPDATA").map_err(|e| InitializationError(e.to_string()))?); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
 
         // Создаем директорию нашего приложения
         let app_dir = base_path.join("leaf");
-        match fs::create_dir_all(&app_dir).await {
-            Ok(_) => {}
-            Err(e) => return Err(InitializationError(e.to_string())),
-        };
+        fs::create_dir_all(&app_dir)
+            .await
+            .map_err(|e| InitializationError(e.to_string()))?;
 
         Ok(app_dir.join("metadata.json")) // Возвращаем полный путь до файла с метаданными
     }
 
     async fn load_metadata(path: &PathBuf) -> Result<EncryptionMetadata, InitializationError> {
         // Метод получения данных из файла метаданных
-        Ok(
-            match serde_json::from_slice(&match fs::read(path).await {
-                // Получаем строковые данные из файла
-                Ok(c) => c,
-                Err(e) => return Err(InitializationError(e.to_string())),
-            }) {
-                Ok(o) => o,
-                Err(e) => return Err(InitializationError(e.to_string())),
-            },
-        ) // Десериализуем прочитанный JSON-текст в структуру и возвращаем его
+        Ok(serde_json::from_slice(
+            &fs::read(path)
+                .await
+                .map_err(|e| InitializationError(e.to_string()))?,
+        )
+        .map_err(|e| InitializationError(e.to_string()))?) // Десериализуем прочитанный JSON-текст в структуру и возвращаем его
     }
 
     async fn save_metadata(
@@ -193,19 +189,12 @@ impl KuznechikEncryptor {
         metadata: &EncryptionMetadata,
     ) -> Result<(), InitializationError> {
         // Метод записи данных в файл метаданных
-        match fs::write(
+        Ok(fs::write(
             path,
-            match serde_json::to_vec(metadata) {
-                // Сериализуем объект в JSON-текст с пробельными символами
-                Ok(d) => d,
-                Err(e) => return Err(InitializationError(e.to_string())),
-            },
+            &serde_json::to_vec(metadata).map_err(|e| InitializationError(e.to_string()))?, // Сериализуем объект в JSON-текст с пробельными символами
         )
         .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => return Err(InitializationError(e.to_string())),
-        } // Записываем текст в файл
+        .map_err(|e| InitializationError(e.to_string()))?) // Записываем текст в файл
     }
 
     pub async fn regenerate_gamma(&mut self) -> Result<(), GammaRegenerationError> {
@@ -214,19 +203,18 @@ impl KuznechikEncryptor {
 
         let metadata = EncryptionMetadata {
             gamma: BASE64.encode(&self.gamma).into_bytes(),
-            salt: match BASE64.decode(match Self::load_metadata(&self.metadata_path).await {
-                Ok(m) => m.salt,
-                Err(e) => return Err(GammaRegenerationError(e.to_string())),
-            }) {
-                Ok(s) => s,
-                Err(e) => return Err(GammaRegenerationError(e.to_string())),
-            },
-        }; // Создается новый экземпляр структуры метаданных, все поля предварительно кодируются в Base64
-
-        match Self::save_metadata(&self.metadata_path, &metadata).await {
-            Ok(_) => Ok(()),
-            Err(e) => return Err(GammaRegenerationError(e.to_string())),
-        } // Сохраняем новые метаданные
+            salt: BASE64
+                .decode(
+                    Self::load_metadata(&self.metadata_path)
+                        .await
+                        .map_err(|e| GammaRegenerationError(e.to_string()))?
+                        .salt,
+                )
+                .map_err(|e| GammaRegenerationError(e.to_string()))?, // Создается новый экземпляр структуры метаданных, все поля предварительно кодируются в Base64
+        };
+        Self::save_metadata(&self.metadata_path, &metadata)
+            .await
+            .map_err(|e| GammaRegenerationError(e.to_string())) // Сохраняем новые метаданные
     }
 }
 

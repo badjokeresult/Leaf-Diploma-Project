@@ -84,18 +84,12 @@ impl SecretSharer for ReedSolomonSecretSharer {
             .collect::<Vec<_>>(); // Перемещение байтов файла в буфер
 
         let encoder: ReedSolomon<galois_8::Field> =
-            match ReedSolomon::new(amount_of_blocks, amount_of_recovers) {
-                Ok(e) => e,
-                Err(e) => {
-                    return Err(DataSplittingError(e.to_string()));
-                }
-            }; // Создание кодировщика схемы Рида-Соломона
-
+            ReedSolomon::new(amount_of_blocks, amount_of_recovers)
+                .map_err(|e| DataSplittingError(e.to_string()))?; // Создание кодировщика схемы Рида-Соломона
         let mut parity = vec![vec![0u8; block_size]; amount_of_recovers];
-        match encoder.encode_sep(&blocks, &mut parity) {
-            Ok(_) => {}
-            Err(e) => return Err(DataSplittingError(e.to_string())),
-        }; // Создание блоков восстановления при помощи кодировщика
+        encoder
+            .encode_sep(&blocks, &mut parity)
+            .map_err(|e| DataSplittingError(e.to_string()))?; // Создание блоков восстановления при помощи кодировщика
 
         Ok(ReedSolomonChunks::new(blocks, parity)) // Возврат структуры с блоками
     }
@@ -110,14 +104,11 @@ impl SecretSharer for ReedSolomonSecretSharer {
         let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
         let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2); // Получение длин данных и восстановления
 
-        let decoder: ReedSolomon<galois_8::Field> = match ReedSolomon::new(data_len, recovery_len) {
-            Ok(d) => d,
-            Err(e) => return Err(DataRecoveringError(e.to_string())),
-        }; // Создание декодера Рида-Соломона
-        match decoder.reconstruct(&mut full_data) {
-            Ok(_) => {}
-            Err(e) => return Err(DataRecoveringError(e.to_string())),
-        }; // Восстановление данных из блоков восстановления, если каких-то данных нет
+        let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(data_len, recovery_len)
+            .map_err(|e| DataRecoveringError(e.to_string()))?; // Создание декодера Рида-Соломона
+        decoder
+            .reconstruct(&mut full_data)
+            .map_err(|e| DataRecoveringError(e.to_string()))?; // Восстановление данных из блоков восстановления, если каких-то данных нет
 
         let content = full_data[..data_len]
             .par_iter()

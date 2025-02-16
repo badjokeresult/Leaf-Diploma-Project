@@ -2,7 +2,7 @@ use errors::{FromBytesCastError, IntoBytesCastError};
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации структуры
 use serde_json; // Внешняя зависимость для сериализации и десериализации в JSON
 
-use base64::prelude::*; // Внешняя зависимость для кодирования и декодирования по алгоритму Base64
+use base64::prelude::{Engine as _, BASE64_STANDARD as BASE64}; // Внешняя зависимость для кодирования и декодирования по алгоритму Base64
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum Message {
@@ -16,26 +16,19 @@ pub enum Message {
 impl Message {
     pub fn into_bytes(self) -> Result<Vec<u8>, IntoBytesCastError> {
         // Метод перевода сообщения в вектор
-        Ok(
-            BASE64_STANDARD // Сериализация в JSON, затем кодирование в Base64
-                .encode(match serde_json::to_vec(&self) {
-                    Ok(d) => d,
-                    Err(e) => return Err(IntoBytesCastError(e.to_string())),
-                })
-                .into_bytes(),
-        )
+        Ok(BASE64
+            .encode(serde_json::to_vec(&self).map_err(|e| IntoBytesCastError(e.to_string()))?)
+            .into_bytes()) // Сериализация в JSON и кодирование в Base64
     }
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
         // Метод перевода вектора в объект сообщения
-        match serde_json::from_slice(match &BASE64_STANDARD.decode(&value) {
-            // Декодирование из Base64 и десериализация из JSON
-            Ok(d) => d,
-            Err(e) => return Err(FromBytesCastError(e.to_string())),
-        }) {
-            Ok(d) => Ok(d),
-            Err(e) => return Err(FromBytesCastError(e.to_string())),
-        }
+        Ok(serde_json::from_slice(
+            &BASE64
+                .decode(&value)
+                .map_err(|e| FromBytesCastError(e.to_string()))?,
+        )
+        .map_err(|e| FromBytesCastError(e.to_string()))?) // Декодирование по Base64 и десериализация из JSON
     }
 }
 
