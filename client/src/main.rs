@@ -206,14 +206,15 @@ async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
 
     let password = std::env::var("PASSWORD").unwrap();
     let decryptor = KuznechikEncryptor::new(&password).await.unwrap();
+    let (mut new_data, mut new_recv) = (vec![], vec![]);
     for c in data.iter_mut() {
-        decryptor.decrypt_chunk(c).unwrap();
+        new_data.push(decryptor.decrypt_chunk(c)?);
     }
     for c in recv.iter_mut() {
-        decryptor.decrypt_chunk(c).unwrap();
+        new_recv.push(decryptor.decrypt_chunk(c)?);
     }
 
-    let chunks = ReedSolomonChunks::new(data, recv);
+    let chunks = ReedSolomonChunks::new(new_data, new_recv);
     let sharer = ReedSolomonSecretSharer::new().unwrap();
     let final_content = sharer.recover_from_chunks(chunks).unwrap();
     fs::write(filepath, final_content).await.unwrap();
