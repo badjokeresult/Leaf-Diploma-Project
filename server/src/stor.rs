@@ -1,24 +1,24 @@
 use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
 
-use tokio::{fs, task}; // Внешняя зависимость для работы с файловыми операциями асинхронно
+use tokio::fs; // Внешняя зависимость для работы с файловыми операциями асинхронно
 use uuid::Uuid; // Внешняя зависимость для генерации UUID
 use walkdir::WalkDir; // Внешняя зависимость для рекурсивного обхода директорий
 
 use common::{Hasher, StreebogHasher}; // Зависимость внутренней библиотеки для вычисления хэш-сумм
 
-use consts::*; // Внутренний модуль с константами
+// use consts::*; // Внутренний модуль с константами
 use errors::*; // Внутренний модуль с составными типами ошибок
 
-mod consts {
-    // Модуль с константами
-    pub const MAX_OCCUPIED_SPACE: usize = 10 * 1024 * 1024 * 1024; // Максимальный размер хранилища сервера - 10 Гб
-}
+// mod consts {
+//     // Модуль с константами
+//     pub const MAX_OCCUPIED_SPACE: usize = 10 * 1024 * 1024 * 1024; // Максимальный размер хранилища сервера - 10 Гб
+// }
 
 pub trait ServerStorage {
     // Трейт серверного хранилища
     async fn save(&self, hash: &str, data: &[u8]) -> Result<(), SavingDataError>; // Шаблон метода сохранения данных
     async fn get(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError>; // Шаблон метода получения данных
-    async fn can_save(&self) -> Result<bool, SavingDataError>; // Шаблон метода проверки возможности сохранения
+                                                                             // async fn can_save(&self) -> Result<bool, SavingDataError>; // Шаблон метода проверки возможности сохранения
 }
 
 pub struct UdpServerStorage {
@@ -37,30 +37,30 @@ impl UdpServerStorage {
         }
     }
 
-    async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError> {
-        // Метод расчета текущего занятого хранилищем места на диске
-        let path = self.path.clone();
+    // async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError> {
+    //     // Метод расчета текущего занятого хранилищем места на диске
+    //     let path = self.path.clone();
 
-        let size = task::spawn_blocking(move || {
-            // Запускаем блокирующую асинхронную задачу для прохода по директории
-            let mut total_size = 0; // Счетчик занятого места в байтах
-            for entry in WalkDir::new(&path) {
-                let entry = entry.map_err(|e| RetrievingDataError(e.to_string()))?; // Пытаемся получить объект в директории
-                if entry.path().is_file() {
-                    // Проверяем, что объект является файлом
-                    if let Ok(meta) = std::fs::metadata(entry.path()) {
-                        // Пытаемся получить сведения о файле
-                        total_size += meta.len() as usize; // Добавляем размер файла к общему счетчику
-                    }
-                }
-            }
-            Ok(total_size) // Возвращаем счетчик
-        })
-        .await
-        .map_err(|e| RetrievingDataError(e.to_string()))??;
+    //     let size = task::spawn_blocking(move || {
+    //         // Запускаем блокирующую асинхронную задачу для прохода по директории
+    //         let mut total_size = 0; // Счетчик занятого места в байтах
+    //         for entry in WalkDir::new(&path) {
+    //             let entry = entry.map_err(|e| RetrievingDataError(e.to_string()))?; // Пытаемся получить объект в директории
+    //             if entry.path().is_file() {
+    //                 // Проверяем, что объект является файлом
+    //                 if let Ok(meta) = std::fs::metadata(entry.path()) {
+    //                     // Пытаемся получить сведения о файле
+    //                     total_size += meta.len() as usize; // Добавляем размер файла к общему счетчику
+    //                 }
+    //             }
+    //         }
+    //         Ok(total_size) // Возвращаем счетчик
+    //     })
+    //     .await
+    //     .map_err(|e| RetrievingDataError(e.to_string()))??;
 
-        Ok(size) // Возвращаем размер директории
-    }
+    //     Ok(size) // Возвращаем размер директории
+    // }
 
     async fn search_for_hash(&self, hash: &str) -> Result<(PathBuf, Vec<u8>), RetrievingDataError> {
         // Метод вычисления хэш-сумм всех файлов в директории
@@ -116,14 +116,14 @@ impl ServerStorage for UdpServerStorage {
         )))
     }
 
-    async fn can_save(&self) -> Result<bool, SavingDataError> {
-        // Реализация метода проверки возможности сохранения файла
-        Ok(self
-            .get_occupied_space()
-            .await
-            .map_err(|e| SavingDataError(e.to_string()))?
-            < MAX_OCCUPIED_SPACE)
-    }
+    // async fn can_save(&self) -> Result<bool, SavingDataError> {
+    //     // Реализация метода проверки возможности сохранения файла
+    //     Ok(self
+    //         .get_occupied_space()
+    //         .await
+    //         .map_err(|e| SavingDataError(e.to_string()))?
+    //         < MAX_OCCUPIED_SPACE)
+    // }
 }
 
 mod errors {

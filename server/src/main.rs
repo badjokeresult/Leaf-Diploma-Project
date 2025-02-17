@@ -34,12 +34,10 @@ async fn process_packet(
     let message = Message::from_bytes(data)?;
     match message.clone() {
         Message::SendingReq(h) => {
-            if storage.can_save().await? {
-                let ack = Message::SendingAck(h).into_bytes()?;
-                let packet = Packet::new(ack, addr);
-                socket.send(packet).await?;
-            }
-            Err(Box::new(NoFreeSpaceError))
+            let ack = Message::SendingAck(h).into_bytes()?;
+            let packet = Packet::new(ack, addr);
+            socket.send(packet).await?;
+            Ok(())
         }
         Message::RetrievingReq(h) => {
             if let Ok(d) = storage.get(&h).await {
