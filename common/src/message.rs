@@ -1,8 +1,9 @@
-use errors::{FromBytesCastError, IntoBytesCastError};
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации структуры
 use serde_json; // Внешняя зависимость для сериализации и десериализации в JSON
 
 use base64::prelude::{Engine as _, BASE64_STANDARD as BASE64}; // Внешняя зависимость для кодирования и декодирования по алгоритму Base64
+
+use errors::*;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum Message {

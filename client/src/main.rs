@@ -64,13 +64,18 @@ struct Metadata {
     // Тип метаданных файла, хранит хэш-суммы каждого чанка файла
     data: Vec<String>,     // Поле, хранящее хэш-суммы блоков данных
     recovery: Vec<String>, // Поле, хранящее хэш-суммы блоков восстановления
+    block_size: usize,     // Поле, хранящее размер каждого блока данных
 }
 
 impl Metadata {
     // Реализация структуры
-    pub fn new(data: Vec<String>, recovery: Vec<String>) -> Metadata {
+    pub fn new(data: Vec<String>, recovery: Vec<String>, block_size: usize) -> Metadata {
         // Конструктор
-        Metadata { data, recovery }
+        Metadata {
+            data,
+            recovery,
+            block_size,
+        }
     }
 
     pub fn get_data(&self) -> Vec<String> {
@@ -81,6 +86,10 @@ impl Metadata {
     pub fn get_recv(&self) -> Vec<String> {
         // Метод получения глубокой копии хэш-сумм блоков восстановления
         self.recovery.clone()
+    }
+
+    pub fn get_block_size(&self) -> usize {
+        self.block_size
     }
 }
 
@@ -102,6 +111,7 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let sharer = ReedSolomonSecretSharer::new()?; // Создание экземпляра разделителя
     let chunks = sharer.split_into_chunks(&content)?; // Разделение файла на блоки
     let (data, recovery) = chunks.deconstruct(); // Разбор блоков на блоки данных и восстановительные
+    let block_size = data.first().unwrap().len();
 
     let password = std::env::var("PASSWORD")?; // TODO: Написать нормальный сбор пароля
     let encryptor = KuznechikEncryptor::new(&password).await?; // Создание шифратора
@@ -124,7 +134,7 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         .map(|x| hasher.calc_hash_for_chunk(x))
         .collect::<Vec<_>>();
 
-    let metadata = Metadata::new(data_hash, recv_hash);
+    let metadata = Metadata::new(data_hash, recv_hash, block_size);
 
     let socket = UdpSocket::bind(LOCAL_ADDR).await?;
     socket.set_broadcast(true)?;
@@ -166,15 +176,21 @@ async fn send_chunk(
     Err(Box::new(SendingChunkError(hash.to_string())))
 }
 
-async fn recv_chunk(socket: &UdpSocket, hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+async fn recv_chunk(
+    socket: &UdpSocket,
+    hash: &str,
+    block_size: usize,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let req: Vec<u8> = Message::RetrievingReq(hash.to_string()).into_bytes()?;
     socket.send_to(&req, BROADCAST_ADDR).await?;
     let mut content = [0u8; MAX_UDP_DATAGRAM_SIZE];
     if let Ok((sz, _)) = socket.recv_from(&mut content).await {
-        let content = Message::from_bytes(content[..sz].to_vec())?;
-        if let Message::ContentFilled(h, d) = content {
-            if h.eq(hash) {
-                return Ok(d);
+        if sz != block_size {
+            let content = Message::from_bytes(content[..sz].to_vec())?;
+            if let Message::ContentFilled(h, d) = content {
+                if h.eq(hash) {
+                    return Ok(d);
+                }
             }
         }
     }
@@ -190,18 +206,29 @@ async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let mut recv = vec![];
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
     socket.set_broadcast(true).unwrap();
+    let block_size = metadata.get_block_size();
     for h in metadata.get_data().iter() {
-        data.push(recv_chunk(&socket, h).await?);
+        data.push(
+            recv_chunk(&socket, h, block_size)
+                .await
+                .map_or(vec![], |v| v),
+        );
     }
-    for h in metadata.get_recv().iter() {
-        recv.push(recv_chunk(&socket, h).await?);
-    }
-
-    for d in &data {
-        println!("{}", d.len());
-    }
-    for d in &recv {
-        println!("{}", d.len());
+    let recv_hashes = metadata.get_recv();
+    for i in 0..data.len() {
+        if data[i].len() == 0 {
+            println!(
+                "Data chunk {} was not received, trying to receive recovering one...",
+                i + 1
+            );
+            recv.push(
+                recv_chunk(&socket, &recv_hashes[i], block_size)
+                    .await
+                    .expect("Cannot receive both data and recovery chunk, please try again later"),
+            );
+        } else {
+            recv.push(vec![]);
+        }
     }
 
     let password = std::env::var("PASSWORD").unwrap();

@@ -127,11 +127,12 @@ impl ServerStorage for UdpServerStorage {
 }
 
 mod errors {
-    use std::error::Error;
-    use std::fmt;
+    // Модуль с составными типами ошибок
+    use std::error::Error; // Зависимость стандартной библиотеки для работы с трейтом ошибок
+    use std::fmt; // Зависимость стандартной библиотеки для работы с форматированием
 
     #[derive(Debug, Clone)]
-    pub struct SavingDataError(pub String);
+    pub struct SavingDataError(pub String); // Тип ошибки невозможности сохранения файла
 
     impl fmt::Display for SavingDataError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -142,7 +143,7 @@ mod errors {
     impl Error for SavingDataError {}
 
     #[derive(Debug, Clone)]
-    pub struct RetrievingDataError(pub String);
+    pub struct RetrievingDataError(pub String); // Тип ошибки невозможности получения данных
 
     impl fmt::Display for RetrievingDataError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
