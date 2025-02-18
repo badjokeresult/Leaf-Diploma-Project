@@ -75,26 +75,21 @@ impl SecretSharer for ReedSolomonSecretSharer {
     fn split_into_chunks(&self, secret: &[u8]) -> Result<ReedSolomonChunks, DataSplittingError> {
         // Метод разбиения файла на блоки
         let block_size = self.calc_block_size(secret.len()); // Получение размера блока
-                                                             //let amount_of_blocks = Self::calc_amount_of_blocks(secret.len(), block_size); // Получение количества блоков
-                                                             //let amount_of_recovers = amount_of_blocks; // Количество блоков восстановления равно количеству блоков данных
+
         let mut blocks = secret
             .par_iter()
             .cloned()
             .chunks(block_size)
             .collect::<Vec<_>>(); // Перемещение байтов файла в буфер
         let blocks_len = blocks.len();
-        let mut tailing_zeros = vec![0u8; block_size - blocks.last().unwrap().len()];
-        blocks[blocks_len - 1].append(&mut tailing_zeros);
+        let last_block_size = blocks.last().unwrap().len();
+        if last_block_size != block_size {
+            blocks[blocks_len - 1].append(&mut vec![0u8; block_size - last_block_size]);
+        }
 
         let encoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(blocks.len(), blocks.len())
             .map_err(|e| DataSplittingError(e.to_string()))?; // Создание кодировщика схемы Рида-Соломона
         let mut parity = vec![vec![0u8; block_size]; blocks.len()];
-        for b in &blocks {
-            println!("{}", b.len());
-        }
-        for b in &parity {
-            println!("{}", b.len());
-        }
         encoder
             .encode_sep(&blocks, &mut parity)
             .map_err(|e| DataSplittingError(e.to_string()))?; // Создание блоков восстановления при помощи кодировщика
