@@ -63,11 +63,6 @@ impl ReedSolomonSecretSharer {
         let bs = ((bs + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
         bs
     }
-
-    fn calc_amount_of_blocks(file_size: usize, block_size: usize) -> usize {
-        // Метод вычисления количества блоков
-        (file_size + block_size - 1) / block_size
-    }
 }
 
 impl SecretSharer for ReedSolomonSecretSharer {
