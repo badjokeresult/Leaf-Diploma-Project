@@ -111,45 +111,48 @@ async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
     let sharer = ReedSolomonSecretSharer::new()?; // Создание экземпляра разделителя
     let chunks = sharer.split_into_chunks(&content)?; // Разделение файла на блоки
     let (data, recovery) = chunks.deconstruct(); // Разбор блоков на блоки данных и восстановительные
-    let block_size = data.first().unwrap().len();
+    let block_size = data.first().map_or(
+        Err(SendingChunkError(String::from("No data was found"))),
+        |v| Ok(v.len()),
+    )?; // Получение размера каждого блока для последующей записи в метаданные
 
     let password = std::env::var("PASSWORD")?; // TODO: Написать нормальный сбор пароля
     let encryptor = KuznechikEncryptor::new(&password).await?; // Создание шифратора
     let data = data
         .par_iter()
         .map(|x| encryptor.encrypt_chunk(x))
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>(); // Шифрование каждого блока данных
     let recovery = recovery
         .par_iter()
         .map(|x| encryptor.encrypt_chunk(x))
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>(); // Шифрование каждого блока восстановления
 
-    let hasher = StreebogHasher::new();
+    let hasher = StreebogHasher::new(); // Создание хэшера
     let data_hash = data
         .par_iter()
         .map(|x| hasher.calc_hash_for_chunk(x))
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>(); // Вычисление хэш-суммы для каждого блока данных
     let recv_hash = recovery
         .par_iter()
         .map(|x| hasher.calc_hash_for_chunk(x))
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>(); // Вычисление хэш-суммы для каждого блока восстановления
 
-    let metadata = Metadata::new(data_hash, recv_hash, block_size);
+    let metadata = Metadata::new(data_hash, recv_hash, block_size); // Создание объекта метаданных
 
-    let socket = UdpSocket::bind(LOCAL_ADDR).await?;
-    socket.set_broadcast(true)?;
-    let data_hashes = metadata.get_data();
-    let recv_hashes = metadata.get_recv();
+    let socket = UdpSocket::bind(LOCAL_ADDR).await?; // Создание UDP-сокета
+    socket.set_broadcast(true)?; // Разрешение сокету на отправку широковещательных запросов
+    let data_hashes = metadata.get_data(); // Получение списка хэшей данных
+    let recv_hashes = metadata.get_recv(); // Получение списка хэшей восстановления
     for i in 0..data.len() {
-        send_chunk(&socket, &data_hashes[i], &data[i]).await?;
+        send_chunk(&socket, &data_hashes[i], &data[i]).await?; // Отправляем блоки данных
     }
     for i in 0..recovery.len() {
-        send_chunk(&socket, &recv_hashes[i], &recovery[i]).await?;
+        send_chunk(&socket, &recv_hashes[i], &recovery[i]).await?; // Отправляем блоки восстановления
     }
 
-    let json = serde_json::to_vec(&metadata)?;
-    let b64 = BASE64.encode(json);
-    fs::write(filepath, &b64).await?;
+    let json = serde_json::to_vec(&metadata)?; // Сериализация в JSON метаданных
+    let b64 = BASE64.encode(json); // Кодирование в base64
+    fs::write(filepath, &b64).await?; // Запись в исходный файл вместо данных
 
     Ok(())
 }
@@ -158,102 +161,118 @@ async fn send_chunk(
     socket: &UdpSocket,
     hash: &str,
     data: &[u8],
+    // Метод отправки блока в домен
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?;
-    socket.send_to(&req, BROADCAST_ADDR).await?;
-    let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE];
+    let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?; // Создание запроса на отправку
+    socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка запроса на широковещательный адрес
+    let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для записи пришедших данных
     while let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
-        let ack = Message::from_bytes(ack[..sz].to_vec())?;
+        // Ожидание получения подтверждения
+        let ack = Message::from_bytes(ack[..sz].to_vec())?; // Проверка валидности сообщения
         if let Message::SendingAck(h) = ack {
+            // Проверка типа сообщения
             if h.eq(hash) {
+                // Проверка равенства хэш-сумм
                 let content: Vec<u8> =
-                    Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?;
-                socket.send_to(&content, addr).await?;
-                return Ok(());
+                    Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
+                socket.send_to(&content, addr).await?; // Отправка сообщения с данными
+                return Ok(()); // Прерывание цикла и выход из функции
             }
         }
     }
-    Err(Box::new(SendingChunkError(hash.to_string())))
+    Err(Box::new(SendingChunkError(hash.to_string()))) // Если выхода из цикла не произошло - возвращаем ошибку
 }
 
 async fn recv_chunk(
     socket: &UdpSocket,
     hash: &str,
     block_size: usize,
+    // Функция получения данных из домена
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let req: Vec<u8> = Message::RetrievingReq(hash.to_string()).into_bytes()?;
-    socket.send_to(&req, BROADCAST_ADDR).await?;
-    let mut content = [0u8; MAX_UDP_DATAGRAM_SIZE];
+    let req: Vec<u8> = Message::RetrievingReq(hash.to_string()).into_bytes()?; // Создание запроса на получение
+    socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка сообщения на широковещательный адрес
+    let mut content = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для приема сообщения
     if let Ok((sz, _)) = socket.recv_from(&mut content).await {
-        if sz != block_size {
-            let content = Message::from_bytes(content[..sz].to_vec())?;
-            if let Message::ContentFilled(h, d) = content {
-                if h.eq(hash) {
-                    return Ok(d);
+        // Ожидание сообщения из домена
+        let content = Message::from_bytes(content[..sz].to_vec())?; // Проверка корректности сообщения
+        if let Message::ContentFilled(h, d) = content {
+            // Проверка типа сообщения
+            if h.eq(hash) {
+                // Проверка равенства хэш-сумм
+                if d.len() == block_size {
+                    // Проверка равенства размеров блока данных
+                    return Ok(d); // Возврат данных
                 }
             }
         }
     }
-    Err(Box::new(ReceivingChunkError(hash.to_string())))
+    Err(Box::new(ReceivingChunkError(hash.to_string()))) // Если не произошел возврат - возвращаем ошибку
 }
 
 async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let content = fs::read_to_string(&filepath).await.unwrap();
-    let json = BASE64.decode(content).unwrap();
-    let metadata: Metadata = serde_json::from_slice(&json).unwrap();
+    // Функция восстановления файла
+    let content = fs::read_to_string(&filepath).await.unwrap(); // Чтение метаданных файла
+    let json = BASE64.decode(content).unwrap(); // Декодирование из base64
+    let metadata: Metadata = serde_json::from_slice(&json).unwrap(); // Десериализация из JSON
 
-    let mut data = vec![];
-    let mut recv = vec![];
-    let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-    socket.set_broadcast(true).unwrap();
-    let block_size = metadata.get_block_size();
-    for h in metadata.get_data().iter() {
+    let mut data = vec![]; // Вектор блоков данных
+    let mut recv = vec![]; // Вектор блоков восстановления
+    let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap(); // Создание UDP-сокета
+    socket.set_broadcast(true).unwrap(); // Разрешение сокету выполнять широковещательные запросы
+    let block_size = metadata.get_block_size(); // Получение размера блока из метаданных
+    let data_hashes = metadata.get_data();
+    for h in data_hashes.iter() {
+        // Для каждой хэш-суммы блоков восстановления
         data.push(
             recv_chunk(&socket, h, block_size)
                 .await
-                .map_or(vec![], |v| v),
+                .map_or(vec![], |v| v), // Пытаемся получить данные из сети
+                                        // Если данные были получены - добавляем их в вектор
+                                        // В противном случае добавляем пустой вектор для индикации
         );
     }
-    let recv_hashes = metadata.get_recv();
+    let recv_hashes = metadata.get_recv(); // Получаем хэш-суммы блоков восстановления
     for i in 0..data.len() {
         if data[i].len() == 0 {
+            // Если данный блок данных не был получен
             println!(
-                "Data chunk {} was not received, trying to receive recovering one...",
-                i + 1
+                "Data chunk {} was not received, trying to receive recovering one...", // Предупреждаем пользователя
+                &data_hashes[i],
             );
             recv.push(
                 recv_chunk(&socket, &recv_hashes[i], block_size)
                     .await
                     .expect("Cannot receive both data and recovery chunk, please try again later"),
-            );
+            ); // Пытаемся получить восстанавливающий блок и в случае неудачи останавливаем программу с предупреждением
         } else {
-            recv.push(vec![]);
+            recv.push(vec![]); // Если текущий блок данных есть - возвращаем пустой вектор для индикации
         }
     }
 
-    let password = std::env::var("PASSWORD").unwrap();
-    let decryptor = KuznechikEncryptor::new(&password).await.unwrap();
-    let (mut new_data, mut new_recv) = (vec![], vec![]);
+    let password = std::env::var("PASSWORD").unwrap(); // TODO: написать нормальный граббер пароля
+    let decryptor = KuznechikEncryptor::new(&password).await?; // Создание декриптора на основе пароля
+    let (mut new_data, mut new_recv) = (vec![], vec![]); // Новые векторы для хранения дешифрованных данных
     for c in data.iter_mut() {
-        new_data.push(decryptor.decrypt_chunk(c)?);
+        new_data.push(decryptor.decrypt_chunk(c)?); // Расшифровка блоков данных
     }
     for c in recv.iter_mut() {
-        new_recv.push(decryptor.decrypt_chunk(c)?);
+        new_recv.push(decryptor.decrypt_chunk(c)?); // Расшифровка блоков восстановления
     }
 
-    let chunks = ReedSolomonChunks::new(new_data, new_recv);
-    let sharer = ReedSolomonSecretSharer::new().unwrap();
-    let final_content = sharer.recover_from_chunks(chunks).unwrap();
-    fs::write(filepath, final_content).await.unwrap();
+    let chunks = ReedSolomonChunks::new(new_data, new_recv); // Создание объекта блоков для схемы Рида-Соломона
+    let sharer = ReedSolomonSecretSharer::new().unwrap(); // Создание разделителя по схеме Рида-Соломона
+    let final_content = sharer.recover_from_chunks(chunks).unwrap(); // Восстановление файла из блоков
+    fs::write(filepath, final_content).await.unwrap(); // Запись восстановленных данных в исходный файл
     Ok(())
 }
 
 mod errors {
-    use std::error::Error;
-    use std::fmt;
+    // Модуль с составными типами ошибок
+    use std::error::Error; // Зависимость стандартной библиотеки для работы с трейтом ошибок
+    use std::fmt; // Зависимость стандартной библиотеки для работы с форматированием
 
     #[derive(Debug, Clone)]
-    pub struct SendingChunkError(pub String);
+    pub struct SendingChunkError(pub String); // Тип ошибки отправки блока в домен
 
     impl fmt::Display for SendingChunkError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -264,7 +283,7 @@ mod errors {
     impl Error for SendingChunkError {}
 
     #[derive(Debug, Clone)]
-    pub struct ReceivingChunkError(pub String);
+    pub struct ReceivingChunkError(pub String); // Тип ошибки получения блока из домена
 
     impl fmt::Display for ReceivingChunkError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
