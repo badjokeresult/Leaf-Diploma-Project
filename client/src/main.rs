@@ -157,8 +157,8 @@ async fn send_file(
         .map(|x| hasher.calc_hash_for_chunk(x))
         .collect::<Vec<_>>(); // Вычисление хэш-суммы для каждого блока восстановления
 
-    println!("{:?}", data_hash);
-    println!("{:?}", recv_hash);
+    // println!("{:?}", data_hash);
+    // println!("{:?}", recv_hash);
 
     let metadata = Metadata::new(data_hash, recv_hash, block_size); // Создание объекта метаданных
 
@@ -195,6 +195,7 @@ async fn send_chunk(
             if h.eq(hash) {
                 let content: Vec<u8> =
                     Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
+                println!("{}", content.len());
                 socket.send_to(&content, addr).await?; // Отправка сообщения с данными
                 return Ok(());
             }
