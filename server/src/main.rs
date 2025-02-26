@@ -45,13 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         packet_handler(rx, &storage, &socket_clone).await;
     });
 
-    let recv_task = tokio::spawn(async move {
-        loop {
-            socket.recv(&tx).await; // Запуск ожидания данных из сокета в вызывающем потоке (бесконечный цикл для предотвращения завершения потока при ожидании выполнения задачи)
-        }
-    });
-
-    Ok(())
+    loop {
+        socket.recv(&tx).await; // Запуск ожидания данных из сокета в вызывающем потоке (бесконечный цикл для предотвращения завершения потока при ожидании выполнения задачи)
+    }
 }
 
 async fn packet_handler(mut rx: Receiver<Packet>, storage: &UdpServerStorage, socket: &Socket) {
