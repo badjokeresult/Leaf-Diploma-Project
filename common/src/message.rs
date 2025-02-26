@@ -1,6 +1,5 @@
-// use base64::{prelude::BASE64_STANDARD as BASE64, Engine as _};
+use base64::{prelude::BASE64_STANDARD as BASE64, Engine as _};
 // use bincode::{deserialize, serialize};
-use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации в JSON
                                      //use zstd::{decode_all, encode_all};
 
@@ -17,20 +16,19 @@ pub enum Message {
 
 impl Message {
     pub fn into_bytes(self) -> Result<Vec<u8>, IntoBytesCastError> {
-        // Метод перевода сообщения в вектор
-        let mut buf = Vec::new();
-        self.serialize(&mut Serializer::new(&mut buf))
-            .map_err(|e| IntoBytesCastError(e.to_string()))?;
-        Ok(buf)
+        Ok(BASE64
+            .encode(serde_json::to_vec(&self).map_err(|e| IntoBytesCastError(e.to_string()))?)
+            .as_bytes()
+            .to_vec())
     }
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
-        // Метод перевода вектора в объект сообщения
-        let mut de = Deserializer::new(&value[..]);
-        let obj: Message =
-            Deserialize::deserialize(&mut de).map_err(|e| FromBytesCastError(e.to_string()))?;
-        Ok(obj)
-        // Декодирование по Base64 и десериализация из JSON
+        serde_json::from_slice(
+            &BASE64
+                .decode(&value)
+                .map_err(|e| FromBytesCastError(e.to_string()))?,
+        )
+        .map_err(|e| FromBytesCastError(e.to_string()))
     }
 }
 
