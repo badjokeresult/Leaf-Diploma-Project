@@ -157,6 +157,9 @@ async fn send_file(
         .map(|x| hasher.calc_hash_for_chunk(x))
         .collect::<Vec<_>>(); // Вычисление хэш-суммы для каждого блока восстановления
 
+    println!("{:?}", data_hash);
+    println!("{:?}", recv_hash);
+
     let metadata = Metadata::new(data_hash, recv_hash, block_size); // Создание объекта метаданных
 
     let socket = UdpSocket::bind(LOCAL_ADDR).await?; // Создание UDP-сокета
