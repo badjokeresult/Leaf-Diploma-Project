@@ -186,28 +186,19 @@ async fn send_chunk(
     let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?; // Создание запроса на отправку
     socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка запроса на широковещательный адрес
     let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для записи пришедших данных
-    loop {
-        match time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await? {
-            Ok((sz, addr)) => {
-                // Ожидание получения подтверждения
-                let ack = Message::from_bytes(ack[..sz].to_vec())?; // Проверка валидности сообщения
-                if let Message::SendingAck(h) = ack {
-                    // Проверка типа сообщения
-                    if h.eq(hash) {
-                        // Проверка равенства хэш-сумм
-                        let content: Vec<u8> =
-                            Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
-                        socket.send_to(&content, addr).await?; // Отправка сообщения с данными
-                        return Ok(());
-                    }
-                }
-                return Err(Box::new(SendingChunkError(hash.to_string())));
-            }
-            Err(e) => {
-                return Err(Box::new(SendingChunkError(e.to_string())));
+    while let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
+        let ack = Message::from_bytes(ack[..sz].to_vec())?; // Проверка валидности сообщения
+        if let Message::SendingAck(h) = ack {
+            if h.eq(hash) {
+                let content: Vec<u8> =
+                    Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
+                socket.send_to(&content, addr).await?; // Отправка сообщения с данными
+                return Ok(());
             }
         }
+        return Err(Box::new(SendingChunkError(hash.to_string())));
     }
+    Err(Box::new(SendingChunkError(hash.to_string())))
 }
 
 async fn recv_chunk(
@@ -219,26 +210,21 @@ async fn recv_chunk(
     let req: Vec<u8> = Message::RetrievingReq(hash.to_string()).into_bytes()?; // Создание запроса на получение
     socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка сообщения на широковещательный адрес
     let mut content = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для приема сообщения
-    match time::timeout(Duration::from_secs(5), socket.recv_from(&mut content)).await? {
-        Ok((sz, _)) => {
-            // Ожидание сообщения из домена
-            let content = Message::from_bytes(content[..sz].to_vec())?; // Проверка корректности сообщения
-            if let Message::ContentFilled(h, d) = content {
-                // Проверка типа сообщения
-                if h.eq(hash) {
-                    // Проверка равенства хэш-сумм
-                    if d.len() == block_size {
-                        // Проверка равенства размеров блока данных
-                        return Ok(d); // Возврат данных
-                    }
+    if let Ok((sz, _)) = socket.recv_from(&mut content).await {
+        let content = Message::from_bytes(content[..sz].to_vec())?; // Проверка корректности сообщения
+        if let Message::ContentFilled(h, d) = content {
+            // Проверка типа сообщения
+            if h.eq(hash) {
+                // Проверка равенства хэш-сумм
+                if d.len() == block_size {
+                    // Проверка равенства размеров блока данных
+                    return Ok(d); // Возврат данных
                 }
             }
-            return Err(Box::new(ReceivingChunkError(hash.to_string())));
         }
-        Err(e) => {
-            return Err(Box::new(ReceivingChunkError(e.to_string())));
-        }
+        return Err(Box::new(ReceivingChunkError(hash.to_string())));
     }
+    Err(Box::new(ReceivingChunkError(hash.to_string())))
 }
 
 async fn recv_file(
