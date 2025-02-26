@@ -27,7 +27,7 @@ use errors::*; // Внутренний модуль с составными ти
 mod consts {
     pub const LOCAL_ADDR: &str = "0.0.0.0:0";
     pub const BROADCAST_ADDR: &str = "255.255.255.255:62092";
-    pub const MAX_UDP_DATAGRAM_SIZE: usize = 65527;
+    pub const MAX_UDP_DATAGRAM_SIZE: usize = 1400;
 }
 
 #[derive(Parser, Debug)] // Автоматические реализации трейтов
