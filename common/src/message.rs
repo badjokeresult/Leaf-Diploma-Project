@@ -20,7 +20,8 @@ impl Message {
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
         // Метод перевода вектора в объект сообщения
-        deserialize(&value).map_err(|e| FromBytesCastError(e.to_string())) // Декодирование по Base64 и десериализация из JSON
+        deserialize::<Message>(&value).map_err(|e| FromBytesCastError(e.to_string()))
+        // Декодирование по Base64 и десериализация из JSON
     }
 }
 

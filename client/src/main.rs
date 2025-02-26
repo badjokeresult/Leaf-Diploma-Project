@@ -188,15 +188,17 @@ async fn send_chunk(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?; // Создание запроса на отправку
     socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка запроса на широковещательный адрес
+    println!("Sent {} bytes", req.len());
     let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для записи пришедших данных
     while let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
+        println!("Received {} bytes", sz);
         let ack = Message::from_bytes(ack[..sz].to_vec())?; // Проверка валидности сообщения
         if let Message::SendingAck(h) = ack {
             if h.eq(hash) {
                 let content: Vec<u8> =
                     Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
-                println!("{}", content.len());
                 socket.send_to(&content, addr).await?; // Отправка сообщения с данными
+                println!("{}", content.len());
                 return Ok(());
             }
         }
