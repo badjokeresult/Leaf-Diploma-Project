@@ -201,10 +201,16 @@ async fn send_chunk(
                 println!("Sent {} bytes in CONTENT", content.len());
                 return Ok(());
             }
+            return Err(Box::new(SendingChunkError(format!(
+                "Hashes mismatch: orig = {}, recv = {}",
+                hash, &h
+            ))));
         }
-        return Err(Box::new(SendingChunkError(hash.to_string())));
+        return Err(Box::new(SendingChunkError(String::from(
+            "Invalid message type",
+        ))));
     }
-    Err(Box::new(SendingChunkError(hash.to_string())))
+    Err(Box::new(SendingChunkError(String::from("No ACK received"))))
 }
 
 async fn recv_chunk(
