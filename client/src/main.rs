@@ -5,14 +5,16 @@ use base64::{prelude::BASE64_STANDARD as BASE64, Engine as _};
 use clap::Parser;
 use clap_derive::{Parser, ValueEnum}; // Внешняя зависимость для создания интерфейса командной строки
 
+use dialoguer::{theme::ColorfulTheme, Password};
+
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации объектов
 use tokio::{
     fs,
+    fs::File,
+    io::{AsyncReadExt, BufReader},
     net::UdpSocket,
     time::{self, Duration},
 }; // Внешняя зависимость для асинхронной работы с сетью и файловыми операциями
-
-use rayon::prelude::*;
 
 use common::{
     Encryptor, Hasher, KuznechikEncryptor, Message, ReedSolomonChunks, ReedSolomonSecretSharer,
@@ -101,43 +103,57 @@ impl Metadata {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = load_args(); // Получение аргументов командной строки
 
+    let password = Password::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter the password")
+        .interact()?;
+
+    let sharer: Box<dyn SecretSharer> = Box::new(ReedSolomonSecretSharer::new()?);
+    let encryptor: Box<dyn Encryptor> = Box::new(KuznechikEncryptor::new(&password).await?);
+
     let path = args.get_file(); // Получение пути к файлу
     match args.get_action() {
         // Выбор действия
-        Action::Send => send_file(path).await, // Вызов метода отправки файла в домен
-        Action::Receive => recv_file(path).await, // Вызов метода получения файла из домена
+        Action::Send => {
+            let hasher: Box<dyn Hasher> = Box::new(StreebogHasher::new());
+            send_file(path, sharer, encryptor, hasher).await
+        } // Вызов метода отправки файла в домен
+        Action::Receive => recv_file(path, sharer, encryptor).await, // Вызов метода получения файла из домена
     }
 }
 
-async fn send_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+async fn send_file(
+    filepath: PathBuf,
+    sharer: Box<dyn SecretSharer>,
+    encryptor: Box<dyn Encryptor>,
+    hasher: Box<dyn Hasher>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Метод отправки файла в широковещательный домен
-    let content = fs::read(&filepath).await?; // Чтение содержимого файла
-    let sharer = ReedSolomonSecretSharer::new()?; // Создание экземпляра разделителя
-    let chunks = sharer.split_into_chunks(&content)?; // Разделение файла на блоки
+    let file = File::open(&filepath).await?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = vec![];
+    reader.read_to_end(&mut buffer).await?;
+    let chunks = sharer.split_into_chunks(&buffer)?; // Разделение файла на блоки
     let (data, recovery) = chunks.deconstruct(); // Разбор блоков на блоки данных и восстановительные
     let block_size = data.first().map_or(
         Err(SendingChunkError(String::from("No data was found"))),
         |v| Ok(v.len()),
     )?; // Получение размера каждого блока для последующей записи в метаданные
 
-    let password = std::env::var("PASSWORD")?; // TODO: Написать нормальный сбор пароля
-    let encryptor = KuznechikEncryptor::new(&password).await?; // Создание шифратора
     let data = data
-        .par_iter()
+        .iter()
         .map(|x| encryptor.encrypt_chunk(x))
         .collect::<Vec<_>>(); // Шифрование каждого блока данных
     let recovery = recovery
-        .par_iter()
+        .iter()
         .map(|x| encryptor.encrypt_chunk(x))
         .collect::<Vec<_>>(); // Шифрование каждого блока восстановления
 
-    let hasher = StreebogHasher::new(); // Создание хэшера
     let data_hash = data
-        .par_iter()
+        .iter()
         .map(|x| hasher.calc_hash_for_chunk(x))
         .collect::<Vec<_>>(); // Вычисление хэш-суммы для каждого блока данных
     let recv_hash = recovery
-        .par_iter()
+        .iter()
         .map(|x| hasher.calc_hash_for_chunk(x))
         .collect::<Vec<_>>(); // Вычисление хэш-суммы для каждого блока восстановления
 
@@ -225,7 +241,11 @@ async fn recv_chunk(
     }
 }
 
-async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+async fn recv_file(
+    filepath: PathBuf,
+    sharer: Box<dyn SecretSharer>,
+    encryptor: Box<dyn Encryptor>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Функция восстановления файла
     let content = fs::read_to_string(&filepath).await.unwrap(); // Чтение метаданных файла
     let json = BASE64.decode(content).unwrap(); // Декодирование из base64
@@ -265,18 +285,15 @@ async fn recv_file(filepath: PathBuf) -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    let password = std::env::var("PASSWORD").unwrap(); // TODO: написать нормальный граббер пароля
-    let decryptor = KuznechikEncryptor::new(&password).await?; // Создание декриптора на основе пароля
     let (mut new_data, mut new_recv) = (vec![], vec![]); // Новые векторы для хранения дешифрованных данных
     for c in data.iter_mut() {
-        new_data.push(decryptor.decrypt_chunk(c)?); // Расшифровка блоков данных
+        new_data.push(encryptor.decrypt_chunk(c)?); // Расшифровка блоков данных
     }
     for c in recv.iter_mut() {
-        new_recv.push(decryptor.decrypt_chunk(c)?); // Расшифровка блоков восстановления
+        new_recv.push(encryptor.decrypt_chunk(c)?); // Расшифровка блоков восстановления
     }
 
     let chunks = ReedSolomonChunks::new(new_data, new_recv); // Создание объекта блоков для схемы Рида-Соломона
-    let sharer = ReedSolomonSecretSharer::new().unwrap(); // Создание разделителя по схеме Рида-Соломона
     let final_content = sharer.recover_from_chunks(chunks).unwrap(); // Восстановление файла из блоков
     fs::write(filepath, final_content).await.unwrap(); // Запись восстановленных данных в исходный файл
     Ok(())

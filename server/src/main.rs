@@ -1,145 +1,84 @@
-mod socket; // Объявление модуля для работы с сокетом
-mod stor; // Объявление модуля для работы с хранилищем
+use clap::Parser;
+use clap_derive::Parser;
+use clap_derive::Subcommand;
+use log::info;
+use std::error::Error;
 
-use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
+mod platform;
+mod server;
+mod socket;
+mod stor;
 
-use tokio::fs; // Внешняя зависимость для асинхронных файловых операций
-use tokio::sync::mpsc::{channel, Receiver}; // Внешняя зависимость для асинхронной работы с каналами
+#[derive(Parser)]
+#[command(name = "leaf-server")]
+#[command(about = "Leaf Server Daemon")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
 
-use common::Message; // Зависимость внутренней библиотеки для работы с типом сообщений
-
-use socket::{Packet, Socket}; // Зависимость внутреннего модуля для работы с сокетом
-use stor::{ServerStorage, UdpServerStorage}; // Зависимость внутренного модуля для работы с хранилищем
-
-use consts::*; // Внутренний модуль с константами
-use errors::*; // Внутренний модуль с составными типами ошибок
-
-mod consts {
-    // Модуль с константами
-    #[cfg(windows)]
-    pub const APPS_DIR_ABS_PATH: &str = "APPDATA"; // Имя переменной среды, хранящей корень директории приложений (Windows)
-
-    #[cfg(not(windows))]
-    pub const APPS_DIR_ABS_PATH: &str = "/var/local"; // Абсолютный путь к корню директории хранилища
-
-    pub const APP_DIR: &str = "leaf"; // Директория приложения
-    pub const CHUNKS_DIR: &str = "chunks"; // Директория чанков
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
 }
 
-async fn process_packet(
-    // Функция обработки отдельного пакета
-    packet: Packet,
-    storage: &UdpServerStorage,
-    socket: &Socket,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (data, addr) = packet.deconstruct(); // Разбираем пакет на данные и адрес источника
-    let message = Message::from_bytes(data)?; // Восстанавливаем сообщение из потока байт
-    match message.clone() {
-        Message::SendingReq(h) => {
-            // Если сообщение является запросом на хранение
-            if storage.can_save().await? {
-                // Проверка доступного места на диске
-                let ack = Message::SendingAck(h).into_bytes()?; // Создание сообщения подтверждения хранения и перевод его в поток байт
-                let packet = Packet::new(ack, addr); // Сбор нового пакета
-                socket.send(packet).await?; // Отправка пакета сокету
-                return Ok(()); // Возврат
-            }
-            Err(Box::new(NoFreeSpaceError)) // Если места нет - возвращаем соответствующую ошибку
-        }
-        Message::RetrievingReq(h) => {
-            // Если сообщение является запросом на получение
-            if let Ok(d) = storage.get(&h).await {
-                // Если в хранилище есть такой хэш
-                let message = Message::ContentFilled(h.clone(), d).into_bytes()?; // Создание сообщения с данными и перевод его в поток байт
-                let packet = Packet::new(message, addr); // Сбор нового пакета
-                socket.send(packet).await?; // Отправка пакета в сокет
-                return Ok(()); // Возврат
-            }
-            Err(Box::new(NoHashError(h))) // Если в хранилище нет такого хэша - возвращаем соответствующую ошибку
-        }
-        Message::ContentFilled(h, d) => {
-            // Если сообщение содержит данные
-            storage.save(&h, &d).await?; // Сохраняем данные на диске
-            Ok(()) // Возврат
-        }
-        _ => Err(Box::new(InvalidMessageError)), // Если пришли любые другие данные - возвращаем ошибку
-    }
-}
-
-async fn packet_handler(mut rx: Receiver<Packet>, storage: &UdpServerStorage, socket: &Socket) {
-    // Функция-обработчик сообщений
-    while let Some(p) = rx.recv().await {
-        // Ожидание новых данных из канала в сокете
-        if let Err(e) = process_packet(p, storage, socket).await {
-            // Обрабатываем пакет и проверяем наличие ошибок
-            eprintln!("{}", e.to_string()); // При наличии ошибок пишем их в stderr, но не прерываем поток
-        };
-    }
+#[derive(Subcommand)]
+enum Commands {
+    Install {
+        #[arg(short, long, default_value = "/etc/systemd/system/leaf-server.service")]
+        path: String,
+    },
+    Uninstall,
+    Start,
+    Stop,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let socket = Socket::new().await?; // Создаем объект сокета
+async fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
 
-    let (tx, rx) = channel(100); // Создаем канал с размером очереди 100
+    std::env::set_var("LEAF_LOG", cli.log_level);
+    env_logger::init();
 
-    #[cfg(windows)]
-    let base_path = PathBuf::from(std::env::var(APPS_DIR_ABS_PATH)?); // Получение корня директории хранилища из переменной среды (Windows)
+    match &cli.command {
+        Some(Commands::Install { path }) => {
+            info!("Installing systemd unit file in {}", path);
+            platform::install_service(path)?;
+            info!("Systemd unit file installed successfully");
+            return Ok(());
+        }
+        Some(Commands::Uninstall) => {
+            info!("Removing the service");
+            platform::uninstall_service()?;
+            return Ok(());
+        }
+        Some(Commands::Start) => {
+            info!("Starting the service");
+            platform::start_service()?;
+            return Ok(());
+        }
+        Some(Commands::Stop) => {
+            info!("Stopping the service");
+            platform::stop_service()?;
+            return Ok(());
+        }
+        None => {
+            #[cfg(windows)]
+            {
+                if let Err(e) = platform::run_as_service() {
+                    info!(
+                        "Error launching as service: {}, continuing as common app",
+                        e
+                    );
+                } else {
+                    return Ok(());
+                }
+            }
 
-    #[cfg(not(windows))]
-    let base_path = PathBuf::from(APPS_DIR_ABS_PATH); // Получаем корень директории хранилища из пути (Linux)
-
-    let path = base_path.join(APP_DIR).join(CHUNKS_DIR); // Получаем путь до хранилища
-    fs::create_dir_all(&path).await?; // Создаем все директории на пути, если они еще не созданы
-
-    let storage = UdpServerStorage::new(path); // Создаем объект хранилища
-
-    let socket_clone = socket.clone(); // Клонирование сокета для его использования в асинхронном потоке
-    tokio::spawn(async move {
-        // Старт нового асинхронного потока для обработки сообщений
-        packet_handler(rx, &storage, &socket_clone).await;
-    });
-
-    loop {
-        socket.recv(&tx).await; // Запуск ожидания данных из сокета в вызывающем потоке (бесконечный цикл для предотвращения завершения потока при ожидании выполнения задачи)
-    }
-}
-
-mod errors {
-    // Модуль с составными типами ошибок
-    use std::error::Error; // Зависимость стандартной библиотеки для работы с трейтом ошибок
-    use std::fmt; // Зависимость стандартной библиотеки для работы с форматированием
-
-    #[derive(Debug, Clone)]
-    pub struct NoFreeSpaceError; // Тип ошибки отсутствия свободного места на диске
-
-    impl fmt::Display for NoFreeSpaceError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "No free space left for keeping data")
+            info!("Launching server in default mode");
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+            platform::setup_signal_handler(shutdown_tx)?;
+            server::run(shutdown_rx).await?;
         }
     }
 
-    impl Error for NoFreeSpaceError {}
-
-    #[derive(Debug, Clone)]
-    pub struct NoHashError(pub String); // Тип ошибки отсутствия представленного хэша в хранилище
-
-    impl fmt::Display for NoHashError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "No hash {} was found", self.0)
-        }
-    }
-
-    impl Error for NoHashError {}
-
-    #[derive(Debug, Clone)]
-    pub struct InvalidMessageError; // Тип ошибки нераспознанного сообщения
-
-    impl fmt::Display for InvalidMessageError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "Got invalid message")
-        }
-    }
-
-    impl Error for InvalidMessageError {}
+    Ok(())
 }

@@ -28,7 +28,7 @@ impl ReedSolomonChunks {
 mod consts {
     // Модуль с константами
     pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
-    pub const MAX_BLOCK_SIZE: usize = 65271; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
+    pub const MAX_BLOCK_SIZE: usize = 65216; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
     pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
 
     #[cfg(target_pointer_width = "64")]
@@ -36,6 +36,8 @@ mod consts {
 
     #[cfg(target_pointer_width = "32")]
     pub const ALIGNMENT: usize = 32; // Если система 32-битная - выравнивание по 32
+
+    pub const MAX_AMOUNT_OF_BLOCKS: usize = 128;
 }
 
 pub trait SecretSharer {
@@ -82,13 +84,24 @@ impl SecretSharer for ReedSolomonSecretSharer {
             blocks[blocks_len - 1].append(&mut vec![0u8; block_size - last_block_size]);
         }
 
-        let encoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(blocks.len(), blocks.len())
-            .map_err(|e| DataSplittingError(e.to_string()))?; // Создание кодировщика схемы Рида-Соломона
         let mut parity = vec![vec![0u8; block_size]; blocks.len()];
-        encoder
-            .encode_sep(&blocks, &mut parity)
-            .map_err(|e| DataSplittingError(e.to_string()))?; // Создание блоков восстановления при помощи кодировщика
+        let mut i = 0;
+        while i < blocks.len() {
+            let remaining_blocks = blocks.len() - i;
+            let block_size = remaining_blocks.min(MAX_AMOUNT_OF_BLOCKS); // определяем, сколько элементов обрабатывать
 
+            let encoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(block_size, block_size)
+                .map_err(|e| DataSplittingError(e.to_string()))?;
+
+            encoder
+                .encode_sep(
+                    &blocks[i..i + block_size],     // обрабатываем оставшиеся блоки
+                    &mut parity[i..i + block_size], // обрабатываем оставшиеся элементы для parity
+                )
+                .map_err(|e| DataSplittingError(e.to_string()))?;
+
+            i += block_size; // увеличиваем i на количество обработанных блоков
+        }
         Ok(ReedSolomonChunks::new(blocks, parity)) // Возврат структуры с блоками
     }
 
@@ -98,16 +111,55 @@ impl SecretSharer for ReedSolomonSecretSharer {
     ) -> Result<Vec<u8>, DataRecoveringError> {
         // Метод восстановления файла из блоков
         let (mut data, mut recovery) = blocks.deconstruct();
+        let data_len = data.len();
+
+        // Объединяем data и recovery в один массив для восстановления
         data.append(&mut recovery);
-        let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>(); // Все блоки оборачиваются в Option
-        let (data_len, recovery_len) = (full_data.len() / 2, full_data.len() / 2); // Получение длин данных и восстановления
+        let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>();
 
-        let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(data_len, recovery_len)
-            .map_err(|e| DataRecoveringError(e.to_string()))?; // Создание декодера Рида-Соломона
-        decoder
-            .reconstruct(&mut full_data)
-            .map_err(|e| DataRecoveringError(e.to_string()))?; // Восстановление данных из блоков восстановления, если каких-то данных нет
+        // Обрабатываем блоки последовательно, по MAX_AMOUNT_OF_BLOCKS за раз
+        let mut i = 0;
+        while i < data_len {
+            let remaining_blocks = data_len - i;
+            let block_size = remaining_blocks.min(MAX_AMOUNT_OF_BLOCKS);
 
+            // Создаем декодер для текущего набора блоков
+            let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(block_size, block_size)
+                .map_err(|e| DataRecoveringError(e.to_string()))?;
+
+            // Создаем представление только текущих блоков данных и восстановления
+            let mut current_slice = Vec::with_capacity(block_size * 2);
+
+            // Добавляем блоки данных
+            for j in 0..block_size {
+                if i + j < data_len {
+                    current_slice.push(full_data[i + j].clone());
+                }
+            }
+
+            // Добавляем блоки восстановления
+            for j in 0..block_size {
+                if data_len + i + j < full_data.len() {
+                    current_slice.push(full_data[data_len + i + j].clone());
+                }
+            }
+
+            // Восстанавливаем текущие блоки
+            decoder
+                .reconstruct(&mut current_slice)
+                .map_err(|e| DataRecoveringError(e.to_string()))?;
+
+            // Копируем восстановленные блоки данных обратно
+            for j in 0..block_size {
+                if i + j < data_len {
+                    full_data[i + j] = current_slice[j].clone();
+                }
+            }
+
+            i += block_size;
+        }
+
+        // Извлекаем только блоки данных (без блоков восстановления)
         let content = full_data[..data_len]
             .par_iter()
             .cloned()
@@ -115,10 +167,11 @@ impl SecretSharer for ReedSolomonSecretSharer {
             .flatten()
             .collect::<Vec<_>>();
 
+        // Удаление нулей в конце последовательности
         match content.iter().position(|x| 0u8.eq(x)) {
             Some(p) => Ok(content.split_at(p).0.to_vec()),
             None => Ok(content),
-        } // Удаление нулей в конце последовательности
+        }
     }
 }
 
