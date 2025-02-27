@@ -17,18 +17,11 @@ pub enum Message {
 impl Message {
     pub fn into_bytes(self) -> Result<Vec<u8>, IntoBytesCastError> {
         Ok(BASE64
-            .encode(serde_json::to_vec(&self).map_err(|e| IntoBytesCastError(e.to_string()))?)
-            .as_bytes()
-            .to_vec())
+            .encode(bincode::serialize(&self).map_err(|e| IntoBytesCastError(e.to_string()))?).into_bytes())
     }
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
-        serde_json::from_slice(
-            &BASE64
-                .decode(&value)
-                .map_err(|e| FromBytesCastError(e.to_string()))?,
-        )
-        .map_err(|e| FromBytesCastError(e.to_string()))
+        bincode::deserialize::<Message>(&BASE64.decode(&value).map_err(|e| FromBytesCastError(e.to_string()))?).map_err(|e| FromBytesCastError(e.to_string()))
     }
 }
 
