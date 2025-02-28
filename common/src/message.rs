@@ -1,7 +1,7 @@
-use base64::{prelude::BASE64_STANDARD as BASE64, Engine as _};
-// use bincode::{deserialize, serialize};
+use bincode::{deserialize, serialize};
+
+use lz4::block::{compress, decompress, CompressionMode};
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации в JSON
-                                     //use zstd::{decode_all, encode_all};
 
 use errors::*;
 
@@ -16,12 +16,19 @@ pub enum Message {
 
 impl Message {
     pub fn into_bytes(self) -> Result<Vec<u8>, IntoBytesCastError> {
-        Ok(BASE64
-            .encode(bincode::serialize(&self).map_err(|e| IntoBytesCastError(e.to_string()))?).into_bytes())
+        compress(
+            &serialize(&self).map_err(|e| IntoBytesCastError(e.to_string()))?,
+            Some(CompressionMode::DEFAULT),
+            false,
+        )
+        .map_err(|e| IntoBytesCastError(e.to_string()))
     }
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
-        bincode::deserialize::<Message>(&BASE64.decode(&value).map_err(|e| FromBytesCastError(e.to_string()))?).map_err(|e| FromBytesCastError(e.to_string()))
+        deserialize::<Message>(
+            &decompress(&value, None).map_err(|e| FromBytesCastError(e.to_string()))?,
+        )
+        .map_err(|e| FromBytesCastError(e.to_string()))
     }
 }
 

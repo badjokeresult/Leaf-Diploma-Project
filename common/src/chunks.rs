@@ -28,7 +28,7 @@ impl ReedSolomonChunks {
 mod consts {
     // Модуль с константами
     pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
-    pub const MAX_BLOCK_SIZE: usize = 512; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
+    pub const MAX_BLOCK_SIZE: usize = 1024; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
     pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
 
     #[cfg(target_pointer_width = "64")]
@@ -115,7 +115,9 @@ impl SecretSharer for ReedSolomonSecretSharer {
 
         // Объединяем data и recovery в один массив для восстановления
         data.append(&mut recovery);
-        let mut full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>();
+        let full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>();
+
+        let mut result = Vec::with_capacity(data_len);
 
         // Обрабатываем блоки последовательно, по MAX_AMOUNT_OF_BLOCKS за раз
         let mut i = 0;
@@ -123,44 +125,22 @@ impl SecretSharer for ReedSolomonSecretSharer {
             let remaining_blocks = data_len - i;
             let block_size = remaining_blocks.min(MAX_AMOUNT_OF_BLOCKS);
 
-            // Создаем декодер для текущего набора блоков
+            // // Создаем декодер для текущего набора блоков
             let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(block_size, block_size)
                 .map_err(|e| DataRecoveringError(e.to_string()))?;
-
-            // Создаем представление только текущих блоков данных и восстановления
-            let mut current_slice = Vec::with_capacity(block_size * 2);
-
-            // Добавляем блоки данных
-            for j in 0..block_size {
-                if i + j < data_len {
-                    current_slice.push(full_data[i + j].clone());
-                }
-            }
-
-            // Добавляем блоки восстановления
-            for j in 0..block_size {
-                if data_len + i + j < full_data.len() {
-                    current_slice.push(full_data[data_len + i + j].clone());
-                }
-            }
-
-            // Восстанавливаем текущие блоки
+            let mut curr_slice = Vec::with_capacity(block_size * 2);
+            curr_slice.append(&mut full_data[i..block_size + i].to_vec());
+            curr_slice.append(&mut full_data[data_len + i..data_len + i + block_size].to_vec());
             decoder
-                .reconstruct(&mut current_slice)
+                .reconstruct_data(&mut curr_slice)
                 .map_err(|e| DataRecoveringError(e.to_string()))?;
 
-            // Копируем восстановленные блоки данных обратно
-            for j in 0..block_size {
-                if i + j < data_len {
-                    full_data[i + j] = current_slice[j].clone();
-                }
-            }
-
+            result.append(&mut curr_slice);
             i += block_size;
         }
 
         // Извлекаем только блоки данных (без блоков восстановления)
-        let content = full_data[..data_len]
+        let content = result
             .par_iter()
             .cloned()
             .filter_map(|x| x)
