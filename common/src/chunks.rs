@@ -152,11 +152,11 @@ impl SecretSharer for ReedSolomonSecretSharer {
         println!("{}", content.len());
         // Удаление нулей в конце последовательности
         let content = match content.iter().position(|x| 0u8.eq(x)) {
-            Some(p) => Ok(content.split_at(p).0.to_vec()),
-            None => Ok(content),
-        }
-        .unwrap();
+            Some(p) => content.split_at(p).0.to_vec(),
+            None => content,
+        };
         println!("{}", content.len());
+        Ok(content)
     }
 }
 
