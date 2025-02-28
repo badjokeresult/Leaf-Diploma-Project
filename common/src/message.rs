@@ -1,7 +1,7 @@
 use bincode::{deserialize, serialize};
 
-use lz4::block::{compress, decompress, CompressionMode};
-use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации в JSON
+use serde::{Deserialize, Serialize};
+use zstd::{decode_all, encode_all}; // Внешняя зависимость для сериализации и десериализации в JSON
 
 use errors::*;
 
@@ -16,17 +16,18 @@ pub enum Message {
 
 impl Message {
     pub fn into_bytes(self) -> Result<Vec<u8>, IntoBytesCastError> {
-        compress(
-            &serialize(&self).map_err(|e| IntoBytesCastError(e.to_string()))?,
-            Some(CompressionMode::DEFAULT),
-            false,
+        encode_all(
+            serialize(&self)
+                .map_err(|e| IntoBytesCastError(e.to_string()))?
+                .as_slice(),
+            3,
         )
         .map_err(|e| IntoBytesCastError(e.to_string()))
     }
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
         deserialize::<Message>(
-            &decompress(&value, None).map_err(|e| FromBytesCastError(e.to_string()))?,
+            &decode_all(value.as_slice()).map_err(|e| FromBytesCastError(e.to_string()))?,
         )
         .map_err(|e| FromBytesCastError(e.to_string()))
     }
