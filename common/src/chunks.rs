@@ -149,12 +149,14 @@ impl SecretSharer for ReedSolomonSecretSharer {
             .filter_map(|x| x)
             .flatten()
             .collect::<Vec<_>>();
-
+        println!("{}", content.len());
         // Удаление нулей в конце последовательности
-        match content.iter().position(|x| 0u8.eq(x)) {
+        let content = match content.iter().position(|x| 0u8.eq(x)) {
             Some(p) => Ok(content.split_at(p).0.to_vec()),
             None => Ok(content),
         }
+        .unwrap();
+        println!("{}", content.len());
     }
 }
 
