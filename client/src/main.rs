@@ -226,9 +226,6 @@ async fn send_chunk(
             //     hash, &h
             // ))));
         }
-        return Err(Box::new(SendingChunkError(String::from(
-            "Invalid message type",
-        ))));
     }
     Err(Box::new(SendingChunkError(String::from("No ACK received"))))
 }
