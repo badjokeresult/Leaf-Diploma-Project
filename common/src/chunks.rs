@@ -151,7 +151,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
             .collect::<Vec<_>>();
         println!("{}", content.len());
         // Удаление нулей в конце последовательности
-        let content = match content.iter().position(|x| 0u8.eq(x)) {
+        let content = match content.iter().rposition(|x| 0u8.eq(x)) {
             Some(p) => content.split_at(p).0.to_vec(),
             None => content,
         };
