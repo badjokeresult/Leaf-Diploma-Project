@@ -188,9 +188,6 @@ async fn send_chunk(
     data: &[u8],
     // Метод отправки блока в домен
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?; // Создание запроса на отправку
-    socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка запроса на широковещательный адрес
-    println!("Sent {} bytes in REQ", req.len());
     let localaddr = datalink::interfaces()
         .iter()
         .find(|i| !i.is_loopback() && !i.ips.is_empty())
@@ -205,6 +202,9 @@ async fn send_chunk(
         })?
         .ip();
     println!("{}", localaddr);
+    let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?; // Создание запроса на отправку
+    socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка запроса на широковещательный адрес
+    println!("Sent {} bytes in REQ", req.len());
     let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для записи пришедших данных
     while let Ok((sz, addr)) =
         time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await?
