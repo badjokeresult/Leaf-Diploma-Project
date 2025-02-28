@@ -138,7 +138,7 @@ impl SecretSharer for ReedSolomonSecretSharer {
                 .reconstruct_data(&mut curr_slice)
                 .map_err(|e| DataRecoveringError(e.to_string()))?;
 
-            result.append(&mut curr_slice);
+            result.append(&mut curr_slice[..block_size].to_vec());
             i += block_size;
         }
 
