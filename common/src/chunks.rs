@@ -130,8 +130,8 @@ impl SecretSharer for ReedSolomonSecretSharer {
                 .map_err(|e| DataRecoveringError(e.to_string()))?;
             let mut curr_slice = Vec::with_capacity(block_size * 2);
             let mut tmp_data = full_data[i..block_size + i].to_vec();
-            let mut tmp_recv = full_data[data_len..block_size + i + data_len].to_vec();
-            println!("{}\n{}", tmp_data.len(), tmp_recv.len());
+            let mut tmp_recv = full_data[data_len + i..block_size + i + data_len].to_vec();
+            println!("{} - {}", tmp_data.len(), tmp_recv.len());
             curr_slice.append(&mut tmp_data);
             curr_slice.append(&mut tmp_recv);
             decoder
