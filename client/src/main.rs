@@ -7,6 +7,8 @@ use clap_derive::{Parser, ValueEnum}; // Внешняя зависимость �
 
 use dialoguer::{theme::ColorfulTheme, Password};
 
+use pnet::datalink;
+
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации объектов
 use tokio::{
     fs,
@@ -189,22 +191,39 @@ async fn send_chunk(
     let req: Vec<u8> = Message::SendingReq(hash.to_string()).into_bytes()?; // Создание запроса на отправку
     socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка запроса на широковещательный адрес
     println!("Sent {} bytes in REQ", req.len());
+    let localaddr = datalink::interfaces()
+        .iter()
+        .find(|i| !i.is_loopback() && !i.ips.is_empty())
+        .map_or(
+            Err(SendingChunkError(String::from("No interface found"))),
+            |x| Ok(x),
+        )?
+        .ips
+        .first()
+        .map_or(Err(SendingChunkError(String::from("No IP found"))), |x| {
+            Ok(x)
+        })?
+        .ip();
     let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для записи пришедших данных
-    while let Ok((sz, addr)) = socket.recv_from(&mut ack).await {
+    while let Ok((sz, addr)) =
+        tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await?
+    {
         println!("Received {} bytes IN ACK", sz);
         let ack = Message::from_bytes(ack[..sz].to_vec())?; // Проверка валидности сообщения
-        if let Message::SendingAck(h) = ack {
-            if h.eq(hash) {
-                let content: Vec<u8> =
-                    Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
-                socket.send_to(&content, addr).await?; // Отправка сообщения с данными
-                println!("Sent {} bytes in CONTENT", content.len());
-                return Ok(());
+        if !localaddr.eq(&addr.ip()) {
+            if let Message::SendingAck(h) = ack {
+                if h.eq(hash) {
+                    let content: Vec<u8> =
+                        Message::ContentFilled(hash.to_string(), data.to_vec()).into_bytes()?; // Сборка сообщения с данными
+                    socket.send_to(&content, addr).await?; // Отправка сообщения с данными
+                    println!("Sent {} bytes in CONTENT", content.len());
+                    return Ok(());
+                }
             }
-            return Err(Box::new(SendingChunkError(format!(
-                "Hashes mismatch: orig = {}, recv = {}",
-                hash, &h
-            ))));
+            // return Err(Box::new(SendingChunkError(format!(
+            //     "Hashes mismatch: orig = {}, recv = {}",
+            //     hash, &h
+            // ))));
         }
         return Err(Box::new(SendingChunkError(String::from(
             "Invalid message type",
@@ -222,7 +241,9 @@ async fn recv_chunk(
     let req: Vec<u8> = Message::RetrievingReq(hash.to_string()).into_bytes()?; // Создание запроса на получение
     socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка сообщения на широковещательный адрес
     let mut content = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для приема сообщения
-    if let Ok((sz, _)) = socket.recv_from(&mut content).await {
+    if let Ok((sz, _)) =
+        tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut content)).await?
+    {
         let content = Message::from_bytes(content[..sz].to_vec())?; // Проверка корректности сообщения
         if let Message::ContentFilled(h, d) = content {
             // Проверка типа сообщения

@@ -4,7 +4,6 @@ mod stor;
 use common::Message;
 use consts::*;
 use errors::*;
-use nix::NixPath;
 use socket::*;
 use std::path::PathBuf;
 use stor::*;
@@ -41,10 +40,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = UdpServerStorage::new(path); // Создаем объект хранилища
 
     let socket_clone = socket.clone(); // Клонирование сокета для его использования в асинхронном потоке
-    let handler = tokio::spawn(async move {
+    tokio::spawn(async move {
         // Старт нового асинхронного потока для обработки сообщений
         packet_handler(rx, &storage, &socket_clone).await;
-    });
+    })
+    .await?;
 
     loop {
         socket.recv(&tx).await; // Запуск ожидания данных из сокета в вызывающем потоке (бесконечный цикл для предотвращения завершения потока при ожидании выполнения задачи)

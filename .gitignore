@@ -1,5 +1,3 @@
 *.idea/
 Cargo.lock
 target/
-archive.tar.gz
-test.txt
