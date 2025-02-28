@@ -204,9 +204,10 @@ async fn send_chunk(
             Ok(x)
         })?
         .ip();
+    println!("{}", localaddr);
     let mut ack = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для записи пришедших данных
     while let Ok((sz, addr)) =
-        tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await?
+        time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await?
     {
         println!("Received {} bytes IN ACK", sz);
         let ack = Message::from_bytes(ack[..sz].to_vec())?; // Проверка валидности сообщения
@@ -242,7 +243,7 @@ async fn recv_chunk(
     socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка сообщения на широковещательный адрес
     let mut content = [0u8; MAX_UDP_DATAGRAM_SIZE]; // Буфер для приема сообщения
     if let Ok((sz, _)) =
-        tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut content)).await?
+        time::timeout(Duration::from_secs(5), socket.recv_from(&mut content)).await?
     {
         let content = Message::from_bytes(content[..sz].to_vec())?; // Проверка корректности сообщения
         if let Message::ContentFilled(h, d) = content {
