@@ -129,8 +129,11 @@ impl SecretSharer for ReedSolomonSecretSharer {
             let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(block_size, block_size)
                 .map_err(|e| DataRecoveringError(e.to_string()))?;
             let mut curr_slice = Vec::with_capacity(block_size * 2);
-            curr_slice.append(&mut full_data[i..block_size + i].to_vec());
-            curr_slice.append(&mut full_data[data_len + i..data_len + i + block_size].to_vec());
+            let mut tmp_data = full_data[i..block_size + i].to_vec();
+            let mut tmp_recv = full_data[data_len..block_size + i + data_len].to_vec();
+            println!("{}\n{}", tmp_data.len(), tmp_recv.len());
+            curr_slice.append(&mut tmp_data);
+            curr_slice.append(&mut tmp_recv);
             decoder
                 .reconstruct_data(&mut curr_slice)
                 .map_err(|e| DataRecoveringError(e.to_string()))?;
