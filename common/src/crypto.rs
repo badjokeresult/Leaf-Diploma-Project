@@ -106,7 +106,7 @@ impl KuznechikEncryptor {
                 LOGON32_PROVIDER_DEFAULT,
                 &mut token_handle,
             )
-        } != 0
+        } == 0
         {
             return Err(InitializationError(String::from("Invalid password"))); // Если данные неверны - возвращаем ошибку
         }
