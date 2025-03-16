@@ -1,212 +1,410 @@
-use std::cmp::{max, min}; // Зависимость стандартной библиотеки для вычисления размера блока
+#![allow(refining_impl_trait)]
 
-use rayon::prelude::*; // Внешняя зависимость для параллельной обработки блоков
-use reed_solomon_erasure::{galois_8, ReedSolomon}; // Внешняя зависимость для создания блоков по схеме Рида-Соломона
+use std::error::Error;
+use std::future::Future;
+use std::net::IpAddr;
+use std::path::Path;
+use std::time::Duration;
 
-use consts::*; // Внутренний модуль с константами
-use errors::*; // Внутренний модуль со специфическими ошибками
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+use tokio::fs;
+use tokio::net::UdpSocket;
+use tokio::time;
 
-pub struct ReedSolomonChunks {
-    // Структура абстракции блоков данных и восстановления
-    data: Vec<Vec<u8>>,     // Блоки данных
-    recovery: Vec<Vec<u8>>, // Блоки восстановления
-}
+use crate::crypto::{Encryptor, Hasher};
+use crate::message::Message;
+use crate::shards::SecretSharer;
 
-impl ReedSolomonChunks {
-    // Реализация структуры
-    pub fn new(data: Vec<Vec<u8>>, recovery: Vec<Vec<u8>>) -> ReedSolomonChunks {
-        // Конструктор структуры
-        ReedSolomonChunks { data, recovery }
-    }
-
-    pub fn deconstruct(self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        // Уничтожение ссылки на объект и возврат всех блоков из полей
-        (self.data, self.recovery)
-    }
-}
+use consts::*;
+use errors::*;
 
 mod consts {
-    // Модуль с константами
-    pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
-    pub const MAX_BLOCK_SIZE: usize = 65216; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
-    pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
-
-    #[cfg(target_pointer_width = "64")]
-    pub const ALIGNMENT: usize = 64; // Если система 64-битная - выравнивание по 64
-
-    #[cfg(target_pointer_width = "32")]
-    pub const ALIGNMENT: usize = 32; // Если система 32-битная - выравнивание по 32
-
-    pub const MAX_AMOUNT_OF_BLOCKS: usize = 128;
+    pub const BROADCAST_ADDR: &str = "255.255.255.255:62092";
+    pub const MAX_UDP_PACKET_SIZE: usize = 65535;
 }
 
-pub trait SecretSharer {
-    // Трейт, которому должна удовлетворять структура
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<ReedSolomonChunks, DataSplittingError>; // Метод для разбиения файлов на куски
-    fn recover_from_chunks(
-        &self,
-        blocks: ReedSolomonChunks,
-    ) -> Result<Vec<u8>, DataRecoveringError>; // Метод восстановления файлов из блоков
+pub trait ChunkHash {
+    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> impl ChunkHash;
+    fn get_value(&self) -> String;
+    fn get_size(&self) -> usize;
 }
 
-pub struct ReedSolomonSecretSharer; // Структура схемы Рида-Соломона
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct ReedSolomonChunkHash {
+    value: String,
+    size: usize,
+}
 
-impl ReedSolomonSecretSharer {
-    pub fn new() -> Result<ReedSolomonSecretSharer, InitializationError> {
-        // Конструктор структуры схемы Рида-Соломона
-        Ok(ReedSolomonSecretSharer {})
+impl ChunkHash for ReedSolomonChunkHash {
+    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> ReedSolomonChunkHash {
+        let value = hasher.calc_hash_for_chunk(chunk);
+        ReedSolomonChunkHash {
+            value,
+            size: chunk.len(),
+        }
     }
 
-    fn calc_block_size(&self, file_size: usize) -> usize {
-        // Метод рассчета размера блока
-        let bs = MIN_BLOCK_SIZE as f64
-            * ((file_size as f64 / MIN_BLOCK_SIZE as f64).powf(GROWTH_FACTOR));
-        let bs = max(MIN_BLOCK_SIZE, min(bs as usize, MAX_BLOCK_SIZE));
-        let bs = ((bs + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
-        bs
+    fn get_value(&self) -> String {
+        self.value.clone()
+    }
+
+    fn get_size(&self) -> usize {
+        self.size
     }
 }
 
-impl SecretSharer for ReedSolomonSecretSharer {
-    // Реализация трейта
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<ReedSolomonChunks, DataSplittingError> {
-        // Метод разбиения файла на блоки
-        let block_size = self.calc_block_size(secret.len()); // Получение размера блока
+pub trait Chunk {
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
+    fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>;
+    fn send(
+        self,
+        socket: &UdpSocket,
+        localaddr: IpAddr,
+    ) -> impl Future<Output = Result<impl ChunkHash, Box<dyn Error>>>;
+    fn recv(
+        socket: &UdpSocket,
+        hash: &impl ChunkHash,
+    ) -> impl Future<Output = Result<impl Chunk, Box<dyn Error>>>;
+}
 
-        let mut blocks = secret
-            .par_iter()
-            .cloned()
-            .chunks(block_size)
-            .collect::<Vec<_>>(); // Перемещение байтов файла в буфер
-        let blocks_len = blocks.len();
-        let last_block_size = blocks.last().unwrap().len();
-        if last_block_size != block_size {
-            blocks[blocks_len - 1].append(&mut vec![0u8; block_size - last_block_size]);
-        }
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct ReedSolomonChunk {
+    value: Vec<u8>,
+    hash: Option<ReedSolomonChunkHash>,
+}
 
-        let mut parity = vec![vec![0u8; block_size]; blocks.len()];
-        let mut i = 0;
-        while i < blocks.len() {
-            let remaining_blocks = blocks.len() - i;
-            let block_size = remaining_blocks.min(MAX_AMOUNT_OF_BLOCKS); // определяем, сколько элементов обрабатывать
-
-            let encoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(block_size, block_size)
-                .map_err(|e| DataSplittingError(e.to_string()))?;
-
-            encoder
-                .encode_sep(
-                    &blocks[i..i + block_size],     // обрабатываем оставшиеся блоки
-                    &mut parity[i..i + block_size], // обрабатываем оставшиеся элементы для parity
-                )
-                .map_err(|e| DataSplittingError(e.to_string()))?;
-
-            i += block_size; // увеличиваем i на количество обработанных блоков
-        }
-        Ok(ReedSolomonChunks::new(blocks, parity)) // Возврат структуры с блоками
+impl Chunk for ReedSolomonChunk {
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+        self.value = encryptor.encrypt_chunk(&self.value);
+        Ok(())
     }
 
-    fn recover_from_chunks(
-        &self,
-        blocks: ReedSolomonChunks,
-    ) -> Result<Vec<u8>, DataRecoveringError> {
-        // Метод восстановления файла из блоков
-        let (mut data, mut recovery) = blocks.deconstruct();
-        let data_len = data.len();
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+        self.value = decryptor.decrypt_chunk(&self.value)?;
+        Ok(())
+    }
 
-        // Объединяем data и recovery в один массив для восстановления
-        data.append(&mut recovery);
-        let full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>();
+    fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>> {
+        self.hash = Some(ReedSolomonChunkHash {
+            value: hasher.calc_hash_for_chunk(&self.value),
+            size: self.value.len(),
+        });
+        Ok(())
+    }
 
-        let mut result = Vec::with_capacity(data_len);
-
-        // Обрабатываем блоки последовательно, по MAX_AMOUNT_OF_BLOCKS за раз
-        let mut i = 0;
-        while i < data_len {
-            let remaining_blocks = data_len - i;
-            let block_size = remaining_blocks.min(MAX_AMOUNT_OF_BLOCKS);
-
-            // // Создаем декодер для текущего набора блоков
-            let decoder: ReedSolomon<galois_8::Field> = ReedSolomon::new(block_size, block_size)
-                .map_err(|e| DataRecoveringError(e.to_string()))?;
-            let mut curr_slice = Vec::with_capacity(block_size * 2);
-            let mut tmp_data = full_data[i..block_size + i].to_vec();
-            let mut tmp_recv = full_data[data_len + i..block_size + i + data_len].to_vec();
-            println!("{} - {}", tmp_data.len(), tmp_recv.len());
-            curr_slice.append(&mut tmp_data);
-            curr_slice.append(&mut tmp_recv);
-            decoder
-                .reconstruct_data(&mut curr_slice)
-                .map_err(|e| DataRecoveringError(e.to_string()))?;
-
-            result.append(&mut curr_slice[..block_size].to_vec());
-            i += block_size;
+    async fn send(
+        self,
+        socket: &UdpSocket,
+        localaddr: IpAddr,
+    ) -> Result<ReedSolomonChunkHash, Box<dyn Error>> {
+        let req: Vec<u8> =
+            Message::SendingReq(self.hash.clone().unwrap().get_value()).into_bytes()?;
+        socket.send_to(&req, BROADCAST_ADDR).await?;
+        let mut ack = [0u8; MAX_UDP_PACKET_SIZE];
+        while let Ok((sz, addr)) =
+            time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await?
+        {
+            let ack = Message::from_bytes(ack[..sz].to_vec())?;
+            if !localaddr.eq(&addr.ip()) {
+                if let Message::SendingAck(h) = ack {
+                    if h.eq(&self.hash.clone().unwrap().get_value()) {
+                        let content: Vec<u8> = Message::ContentFilled(
+                            self.hash.clone().unwrap().get_value(),
+                            self.value,
+                        )
+                        .into_bytes()?;
+                        socket.send_to(&content, addr).await?;
+                        return Ok(self.hash.unwrap());
+                    }
+                }
+            }
         }
+        Err(Box::new(SendingChunkError(String::from("Timeout"))))
+    }
 
-        // Извлекаем только блоки данных (без блоков восстановления)
-        let content = result
-            .par_iter()
-            .cloned()
-            .filter_map(|x| x)
-            .flatten()
+    async fn recv(
+        socket: &UdpSocket,
+        hash: &impl ChunkHash,
+    ) -> Result<ReedSolomonChunk, Box<dyn Error>> {
+        let req: Vec<u8> = Message::RetrievingReq(hash.get_value()).into_bytes()?; // Создание запроса на получение
+        socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка сообщения на широковещательный адрес
+        let mut content = [0u8; MAX_UDP_PACKET_SIZE]; // Буфер для приема сообщения
+        if let Ok((sz, _)) =
+            time::timeout(Duration::from_secs(5), socket.recv_from(&mut content)).await?
+        {
+            let content = Message::from_bytes(content[..sz].to_vec())?; // Проверка корректности сообщения
+            if let Message::ContentFilled(h, d) = content {
+                // Проверка типа сообщения
+                if h.eq(&hash.get_value()) {
+                    // Проверка равенства хэш-сумм
+                    if d.len() == hash.get_size() {
+                        // Проверка равенства размеров блока данных
+                        return Ok(ReedSolomonChunk {
+                            value: d,
+                            hash: None,
+                        }); // Возврат данных
+                    }
+                    return Err(Box::new(ReceivingChunkError(String::from(
+                        "Blocks sizes mismatch",
+                    ))));
+                }
+            }
+            return Err(Box::new(ReceivingChunkError(String::from(
+                "Hash is incorrect",
+            ))));
+        }
+        Err(Box::new(ReceivingChunkError(String::from("Timeout"))))
+    }
+}
+
+pub trait Chunks {
+    fn from_file(
+        path: impl AsRef<Path>,
+        sharer: &Box<dyn SecretSharer>,
+    ) -> impl Future<Output = Result<impl Chunks, Box<dyn Error>>>;
+    fn into_file(
+        self,
+        path: impl AsRef<Path>,
+        sharer: &Box<dyn SecretSharer>,
+    ) -> impl Future<Output = Result<(), Box<dyn Error>>>;
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
+    fn update_hashes(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>;
+    fn send(self) -> impl Future<Output = Result<impl ChunksHashes, Box<dyn Error>>>;
+    fn recv(hashes: impl ChunksHashes)
+        -> impl Future<Output = Result<impl Chunks, Box<dyn Error>>>;
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ReedSolomonChunks {
+    data: Vec<ReedSolomonChunk>,
+    recv: Vec<ReedSolomonChunk>,
+}
+
+impl Chunks for ReedSolomonChunks {
+    async fn from_file(
+        path: impl AsRef<Path>,
+        sharer: &Box<dyn SecretSharer>,
+    ) -> Result<ReedSolomonChunks, Box<dyn Error>> {
+        let content = fs::read(path).await?;
+        let (data, recv) = sharer.split_into_chunks(&content)?;
+        Ok(ReedSolomonChunks {
+            data: data
+                .iter()
+                .map(|x| ReedSolomonChunk {
+                    value: x.clone(),
+                    hash: None,
+                })
+                .collect::<Vec<_>>(),
+            recv: recv
+                .iter()
+                .map(|x| ReedSolomonChunk {
+                    value: x.clone(),
+                    hash: None,
+                })
+                .collect::<Vec<_>>(),
+        })
+    }
+
+    async fn into_file(
+        self,
+        path: impl AsRef<Path>,
+        sharer: &Box<dyn SecretSharer>,
+    ) -> Result<(), Box<dyn Error>> {
+        let data = self
+            .data
+            .iter()
+            .map(|x| x.value.clone())
             .collect::<Vec<_>>();
-        println!("{}", content.len());
-        // Удаление нулей в конце последовательности
-        let content = match content.iter().rposition(|x| 0u8.eq(x)) {
-            Some(p) => content.split_at(p).0.to_vec(),
-            None => content,
-        };
-        println!("{}", content.len());
-        Ok(content)
+        let recv = self
+            .recv
+            .iter()
+            .map(|x| x.value.clone())
+            .collect::<Vec<_>>();
+
+        let content = sharer.recover_from_chunks((data, recv))?;
+        fs::write(path, content).await?;
+
+        Ok(())
+    }
+
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+        for c in &mut self.data {
+            c.encrypt(encryptor)?;
+        }
+        for c in &mut self.recv {
+            c.encrypt(encryptor)?;
+        }
+        Ok(())
+    }
+
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+        for c in &mut self.data {
+            c.decrypt(decryptor)?;
+        }
+        for c in &mut self.recv {
+            c.decrypt(decryptor)?;
+        }
+        Ok(())
+    }
+
+    fn update_hashes(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>> {
+        for c in &mut self.data {
+            c.update_hash(hasher)?;
+        }
+        for c in &mut self.recv {
+            c.update_hash(hasher)?;
+        }
+        Ok(())
+    }
+
+    async fn send(self) -> Result<ReedSolomonChunksHashes, Box<dyn Error>> {
+        let localaddr = pnet::datalink::interfaces()
+            .iter()
+            .find(|i| !i.is_loopback() && !i.ips.is_empty())
+            .map_or(
+                Err(SendingChunkError(String::from("No interface found"))),
+                |x| Ok(x),
+            )?
+            .ips
+            .first()
+            .map_or(Err(SendingChunkError(String::from("No IP found"))), |x| {
+                Ok(x)
+            })?
+            .ip();
+
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        socket.set_broadcast(true)?;
+
+        let mut data_hashes = Vec::with_capacity(self.data.len());
+        for c in self.data {
+            data_hashes.push(c.send(&socket, localaddr).await?);
+        }
+        let mut recv_hashes = Vec::with_capacity(self.recv.len());
+        for c in self.recv {
+            recv_hashes.push(c.send(&socket, localaddr).await?);
+        }
+        Ok(ReedSolomonChunksHashes {
+            data: data_hashes,
+            recv: recv_hashes,
+        })
+    }
+
+    async fn recv(hashes: impl ChunksHashes) -> Result<ReedSolomonChunks, Box<dyn Error>> {
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        socket.set_broadcast(true)?;
+        let mut data = Vec::with_capacity(hashes.len());
+        let mut non_received_data_indexes = Vec::with_capacity(hashes.len());
+        for i in 0..hashes.len() {
+            data.push(match ReedSolomonChunk::recv(&socket, &hashes.get_data_hash(i)).await {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Error receiving data chunk ({}), trying to receive a recovering one...", e.to_string());
+                    non_received_data_indexes.push(i);
+                    ReedSolomonChunk {
+                        value: vec![0u8; hashes.get_data_hash(i).get_size()],
+                        hash: None,
+                    }
+                },
+            });
+        }
+        let mut recv = Vec::with_capacity(hashes.len());
+        let mut is_all_recovery_received = true;
+        for i in non_received_data_indexes {
+            if !is_all_recovery_received {
+                break;
+            }
+            recv.push(
+                match ReedSolomonChunk::recv(&socket, &hashes.get_recv_hash(i)).await {
+                    Ok(d) => d,
+                    Err(_) => {
+                        is_all_recovery_received = false;
+                        ReedSolomonChunk {
+                            value: vec![0u8; hashes.get_recv_hash(i).get_size()],
+                            hash: None,
+                        }
+                    }
+                },
+            )
+        }
+        if !is_all_recovery_received {
+            return Err(Box::new(ReceivingChunkError(String::from(
+                "Could not receive both data and recovery chunks",
+            ))));
+        }
+        Ok(ReedSolomonChunks { data, recv })
+    }
+}
+
+pub trait ChunksHashes {
+    fn save_to(self, path: impl AsRef<Path>) -> impl Future<Output = Result<(), Box<dyn Error>>>;
+    fn load_from(
+        path: impl AsRef<Path>,
+    ) -> impl Future<Output = Result<impl ChunksHashes, Box<dyn Error>>>;
+    fn len(&self) -> usize;
+    fn get_data_hash(&self, index: usize) -> impl ChunkHash;
+    fn get_recv_hash(&self, index: usize) -> impl ChunkHash;
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ReedSolomonChunksHashes {
+    data: Vec<ReedSolomonChunkHash>,
+    recv: Vec<ReedSolomonChunkHash>,
+}
+
+impl ChunksHashes for ReedSolomonChunksHashes {
+    async fn save_to(self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+        let data = BASE64_STANDARD.encode(serde_json::to_vec(&self)?);
+        fs::write(path, &data).await?;
+        Ok(())
+    }
+
+    async fn load_from(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
+        let content = fs::read(path).await?;
+        let obj = serde_json::from_slice(&BASE64_STANDARD.decode(&content)?)?;
+        Ok(obj)
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn get_data_hash(&self, index: usize) -> impl ChunkHash {
+        self.data[index].clone()
+    }
+
+    fn get_recv_hash(&self, index: usize) -> impl ChunkHash {
+        self.recv[index].clone()
     }
 }
 
 mod errors {
-    // Модуль с ошибками
     use std::error::Error;
     use std::fmt;
-    use std::fmt::Formatter;
+    use std::fmt::{Display, Formatter};
 
     #[derive(Debug, Clone)]
-    pub struct DataSplittingError(pub String); // Тип ошибки разбиения файла
+    pub struct SendingChunkError(pub String);
 
-    impl fmt::Display for DataSplittingError {
+    impl Display for SendingChunkError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            // Метод отображения сведений об ошибке на экране
-            write!(
-                f,
-                "Error attempting to split a data into chunks: {}",
-                self.0
-            )
+            write!(f, "Error sending chunk: {}", self.0)
         }
     }
 
-    impl Error for DataSplittingError {}
+    impl Error for SendingChunkError {}
 
     #[derive(Debug, Clone)]
-    pub struct DataRecoveringError(pub String); // Тип ошибки восстановления файла
+    pub struct ReceivingChunkError(pub String);
 
-    impl fmt::Display for DataRecoveringError {
+    impl Display for ReceivingChunkError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            // Метод отображения сведений об ошибке на экране
-            write!(f, "Error recovering data from chunks: {}", self.0)
+            write!(f, "Error receiving chunk: {}", self.0)
         }
     }
 
-    impl Error for DataRecoveringError {}
-
-    #[derive(Debug, Clone)]
-    pub struct InitializationError(pub String); // Тип ошибки инициализации структуры разбиения файла
-
-    impl fmt::Display for InitializationError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            // Метод отображения сведений об ошибке на экране
-            write!(f, "Error initializing data: {}", self.0)
-        }
-    }
-
-    impl Error for InitializationError {}
-}
-
-#[cfg(test)]
-mod tests { // Модуль юнит-тестирования
+    impl Error for ReceivingChunkError {}
 }

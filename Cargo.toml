@@ -10,3 +10,6 @@ base64 = "0.22.1"
 rayon = "1.10.0"
 clap = "4.5.27"
 clap_derive = "4.5.24"
+
+[build]
+build = "build.rs"

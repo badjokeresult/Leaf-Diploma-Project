@@ -17,6 +17,7 @@ hex = "0.4.3"
 rayon = { workspace = true }
 bincode = "1.3.3"
 zstd = "0.13.2"
+pnet = "0.35"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59.0", features = [
