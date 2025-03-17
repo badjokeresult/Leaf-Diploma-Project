@@ -90,8 +90,9 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null_mut;
     use winapi::um::securitybaseapi::ImpersonateLoggedOnUser;
-    use winapi::um::winbase::LogonUserW;
-    use winapi::um::winnt::{HANDLE, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
+    use winapi::um::winbase::{
+        LogonUserW, HANDLE, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+    };
     // Функция для конвертации строки в широкие символы для Windows API
     fn to_wide_string(s: &str) -> Vec<u16> {
         OsStr::new(s)
