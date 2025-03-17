@@ -1,33 +1,16 @@
-//mod build;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use clap::{arg, command};
 use clap_derive::{Parser, ValueEnum};
+
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::Password;
+
 use common::{
     Chunks, ChunksHashes, Encryptor, Hasher, KuznechikEncryptor, ReedSolomonChunks,
     ReedSolomonChunksHashes, ReedSolomonSecretSharer, SecretSharer, StreebogHasher,
 };
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::Password;
-use std::path::{Path, PathBuf};
-
-// Добавляем новые импорты для смены пользователя
-#[cfg(unix)]
-use nix::unistd::{setgid, setuid, Gid, Uid};
-#[cfg(windows)]
-use std::ffi::OsStr;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
-#[cfg(windows)]
-use std::ptr::null_mut;
-#[cfg(windows)]
-use winapi::um::securitybaseapi::ImpersonateLoggedOnUser;
-#[cfg(windows)]
-use winapi::um::winbase::LogonUserW;
-#[cfg(windows)]
-use winapi::um::winnt::{HANDLE, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -61,10 +44,13 @@ pub fn load_args() -> Args {
 #[cfg(unix)]
 #[allow(unused_variables)]
 fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use nix::unistd::{setgid, setuid, Gid, Uid};
+    use std::io::{Error, ErrorKind};
+    use users::{get_group_by_name, get_user_by_name};
     // Константы для идентификаторов сервисного пользователя
     // Замените эти значения на реальные ID вашего сервисного пользователя
-    const SERVICE_USER_UID: u32 = 1001;
-    const SERVICE_USER_GID: u32 = 1001;
+    const SERVICE_USER_NAME: &str = "leaf-client";
+    const SERVICE_GROUP_NAME: &str = "leaf-client";
 
     // В Unix-системах пароль потребуется только если используется PAM/LDAP аутентификация
     // В простом случае если у нас есть SUID-бит, пароль не требуется
@@ -73,9 +59,25 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
         return Ok(());
     }
 
+    // Получаем UID по имени пользователя
+    let user = get_user_by_name(SERVICE_USER_NAME).ok_or_else(|| {
+        Error::new(
+            ErrorKind::NotFound,
+            format!("Пользователь '{}' не найден", SERVICE_USER_NAME),
+        )
+    })?;
+
+    // Получаем GID по имени группы
+    let group = get_group_by_name(SERVICE_GROUP_NAME).ok_or_else(|| {
+        Error::new(
+            ErrorKind::NotFound,
+            format!("Группа '{}' не найдена", SERVICE_GROUP_NAME),
+        )
+    })?;
+
     // Сначала меняем GID, затем UID
-    setgid(Gid::from_raw(SERVICE_USER_GID))?;
-    setuid(Uid::from_raw(SERVICE_USER_UID))?;
+    setgid(Gid::from_raw(user.uid()))?;
+    setuid(Uid::from_raw(group.gid()))?;
 
     println!("Успешно изменен пользователь на сервисного");
     Ok(())
@@ -84,6 +86,12 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
 // Функция для смены пользователя в Windows
 #[cfg(windows)]
 fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+    use winapi::um::securitybaseapi::ImpersonateLoggedOnUser;
+    use winapi::um::winbase::LogonUserW;
+    use winapi::um::winnt::{HANDLE, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
     // Функция для конвертации строки в широкие символы для Windows API
     fn to_wide_string(s: &str) -> Vec<u16> {
         OsStr::new(s)

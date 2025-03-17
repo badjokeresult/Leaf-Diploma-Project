@@ -6,8 +6,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::time::Duration;
 
-use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
+use base64::{prelude::BASE64_STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::net::UdpSocket;
@@ -357,14 +356,14 @@ pub struct ReedSolomonChunksHashes {
 
 impl ChunksHashes for ReedSolomonChunksHashes {
     async fn save_to(self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
-        let data = BASE64_STANDARD.encode(serde_json::to_vec(&self)?);
+        let data = BASE64.encode(serde_json::to_vec(&self)?);
         fs::write(path, &data).await?;
         Ok(())
     }
 
     async fn load_from(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
         let content = fs::read(path).await?;
-        let obj = serde_json::from_slice(&BASE64_STANDARD.decode(&content)?)?;
+        let obj = serde_json::from_slice(&BASE64.decode(&content)?)?;
         Ok(obj)
     }
 
