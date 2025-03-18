@@ -93,7 +93,7 @@ mod errors {
     impl Error for SocketInitError {}
 
     #[derive(Debug, Clone)]
-    pub struct SendingPacketError(pub String); // Тип ошибки инициализации сокета
+    pub struct SendingPacketError(pub String); // Тип ошибки отправки пакета
 
     impl fmt::Display for SendingPacketError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

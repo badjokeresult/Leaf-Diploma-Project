@@ -1,14 +1,17 @@
-mod socket;
-mod stor;
+mod socket; // Объявление внутреннего модуля сокета
+mod stor; // Объявление внутреннего модуля хранилища
 
-use common::Message;
-use consts::*;
-use errors::*;
-use socket::*;
-use std::path::PathBuf;
-use stor::*;
-use tokio::fs;
-use tokio::sync::mpsc::{channel, Receiver};
+use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
+
+use tokio::fs; // Внешняя зависимость для асинхронной работы с файловой системой
+use tokio::sync::mpsc::{channel, Receiver}; // Внешняя зависимость для использования асинхронных каналов
+
+use common::Message; // Зависимость библиотеки проекта для работы с сообщениями
+
+use consts::*; // Внутренний модуль с константами
+use errors::*; // Внутренний модуль с ошибками
+use socket::*; // Внутренний модуль сокета
+use stor::*; // Внутренний модуль хранилища
 
 mod consts {
     // Модуль с константами
@@ -143,7 +146,7 @@ mod errors {
     impl Error for InvalidMessageError {}
 
     #[derive(Debug, Clone)]
-    pub struct ServerInitError(pub String);
+    pub struct ServerInitError(pub String); // Тип ошибки инициализации сервера
 
     impl fmt::Display for ServerInitError {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
