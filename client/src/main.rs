@@ -55,15 +55,16 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
     // В Unix-системах пароль потребуется только если используется PAM/LDAP аутентификация
     // В простом случае если у нас есть SUID-бит, пароль не требуется
     if !Uid::effective().is_root() {
-        println!("Предупреждение: Нет прав для смены пользователя. Установите SUID-бит на исполняемый файл.");
-        return Ok(());
+        return Err(
+            format!("Cannot switch user, do you have SUID enabled for the program?").into(),
+        );
     }
 
     // Получаем UID по имени пользователя
     let user = get_user_by_name(SERVICE_USER_NAME).ok_or_else(|| {
         Error::new(
             ErrorKind::NotFound,
-            format!("Пользователь '{}' не найден", SERVICE_USER_NAME),
+            format!("User '{}' not found", SERVICE_USER_NAME),
         )
     })?;
 
@@ -71,7 +72,7 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
     let group = get_group_by_name(SERVICE_GROUP_NAME).ok_or_else(|| {
         Error::new(
             ErrorKind::NotFound,
-            format!("Группа '{}' не найдена", SERVICE_GROUP_NAME),
+            format!("Group '{}' not found", SERVICE_GROUP_NAME),
         )
     })?;
 
@@ -79,7 +80,6 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
     setgid(Gid::from_raw(user.uid()))?;
     setuid(Uid::from_raw(group.gid()))?;
 
-    println!("Успешно изменен пользователь на сервисного");
     Ok(())
 }
 
@@ -127,7 +127,7 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
 
     if logon_result != 0 {
         let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
-        return Err(format!("Не удалось аутентифицировать пользователя: {}", error).into());
+        return Err(format!("Error authenticate user: {}", error).into());
     }
 
     // Применяем олицетворение
@@ -136,20 +136,16 @@ fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Erro
     if impersonation_result != 0 {
         unsafe { winapi::um::handleapi::CloseHandle(token_handle) };
         let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
-        return Err(format!("Не удалось выполнить impersonation: {}", error).into());
+        return Err(format!("Error impersonating user: {}", error).into());
     }
 
-    // Мы специально не освобождаем токен и не вызываем RevertToSelf,
-    // так как хотим, чтобы весь дальнейший код выполнялся под сервисным пользователем
-    println!("Успешно изменен пользователь на {}", SERVICE_USERNAME);
     Ok(())
 }
 
 // Функция-заглушка для других платформ
 #[cfg(not(any(unix, windows)))]
 fn switch_to_service_user(_password: &str) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Смена пользователя не поддерживается на этой платформе");
-    Ok(())
+    Err(format!("This platform is not supported yet").into())
 }
 
 #[tokio::main]
