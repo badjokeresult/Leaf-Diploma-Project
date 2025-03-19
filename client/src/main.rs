@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
@@ -11,6 +13,15 @@ use common::{
     Chunks, ChunksHashes, Encryptor, Hasher, KuznechikEncryptor, ReedSolomonChunks,
     ReedSolomonChunksHashes, ReedSolomonSecretSharer, SecretSharer, StreebogHasher,
 };
+
+use consts::*;
+use errors::SwitchUserError;
+use nix::libc::{setgid, setuid};
+
+mod consts {
+    pub const USER_NAME: &str = "leaf-client";
+    pub const GROUP_NAME: &str = "leaf-client";
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -40,112 +51,78 @@ pub fn load_args() -> Args {
     Args::parse()
 }
 
-// Функция для смены пользователя в Unix-системах
-#[cfg(unix)]
-#[allow(unused_variables)]
-fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use nix::unistd::{setgid, setuid, Gid, Uid};
-    use std::io::{Error, ErrorKind};
-    use users::{get_group_by_name, get_user_by_name};
-    // Константы для идентификаторов сервисного пользователя
-    // Замените эти значения на реальные ID вашего сервисного пользователя
-    const SERVICE_USER_NAME: &str = "leaf-client";
-    const SERVICE_GROUP_NAME: &str = "leaf-client";
+#[cfg(target_os = "linux")]
+fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let uid = users::get_user_by_name(USER_NAME).unwrap();
+    let gid = users::get_group_by_name(GROUP_NAME).unwrap();
 
-    // В Unix-системах пароль потребуется только если используется PAM/LDAP аутентификация
-    // В простом случае если у нас есть SUID-бит, пароль не требуется
-    if !Uid::effective().is_root() {
-        return Err(
-            format!("Cannot switch user, do you have SUID enabled for the program?").into(),
-        );
+    if unsafe { setgid(gid.gid()) } != 0 && unsafe { setuid(uid.uid()) } != 0 {
+        return Err(Box::new(SwitchUserError));
     }
-
-    // Получаем UID по имени пользователя
-    let user = get_user_by_name(SERVICE_USER_NAME).ok_or_else(|| {
-        Error::new(
-            ErrorKind::NotFound,
-            format!("User '{}' not found", SERVICE_USER_NAME),
-        )
-    })?;
-
-    // Получаем GID по имени группы
-    let group = get_group_by_name(SERVICE_GROUP_NAME).ok_or_else(|| {
-        Error::new(
-            ErrorKind::NotFound,
-            format!("Group '{}' not found", SERVICE_GROUP_NAME),
-        )
-    })?;
-
-    // Сначала меняем GID, затем UID
-    setgid(Gid::from_raw(user.uid()))?;
-    setuid(Uid::from_raw(group.gid()))?;
 
     Ok(())
 }
 
-// Функция для смены пользователя в Windows
-#[cfg(windows)]
-fn switch_to_service_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-    use std::ptr::null_mut;
-    use winapi::um::securitybaseapi::ImpersonateLoggedOnUser;
-    use winapi::um::winbase::{
+#[cfg(target_os = "windows")]
+fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // TODO: заменить на impersonate
+    use windows_sys::Win32::Foundation::{FALSE, HANDLE};
+    use windows_sys::Win32::Security::{
         LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
     };
-    use winapi::um::winnt::HANDLE;
-    // Функция для конвертации строки в широкие символы для Windows API
-    fn to_wide_string(s: &str) -> Vec<u16> {
-        OsStr::new(s)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
-    }
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessAsUserW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
 
-    // Учетные данные сервисного пользователя
-    // Имя пользователя должно быть задано в системе
-    const SERVICE_USERNAME: &str = "leaf-client";
-    const SERVICE_DOMAIN: &str = "."; // Для локального компьютера
+    let username = String::from(USER_NAME) + "\0";
+    let password = String::from(password) + "\0";
+    let username = username.encode_utf16().collect::<Vec<u16>>();
+    let password = password.encode_utf16().collect::<Vec<u16>>();
+    let mut token: HANDLE = 0;
 
-    let username = to_wide_string(SERVICE_USERNAME);
-    let domain = to_wide_string(SERVICE_DOMAIN);
-    let password = to_wide_string(password); // Используем пароль, введенный пользователем
-
-    let mut token_handle: HANDLE = null_mut();
-
-    // Получаем токен безопасности для сервисного пользователя
-    let logon_result = unsafe {
+    // Аутентификация пользователя
+    let success = unsafe {
         LogonUserW(
             username.as_ptr(),
-            domain.as_ptr(),
+            std::ptr::null(),
             password.as_ptr(),
             LOGON32_LOGON_INTERACTIVE,
             LOGON32_PROVIDER_DEFAULT,
-            &mut token_handle,
+            &mut token,
         )
     };
 
-    if logon_result != 0 {
-        let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
-        return Err(format!("Error authenticate user: {}", error).into());
-    }
+    if success != FALSE {
+        let mut startup_info: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        startup_info.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        let command_line = (String::from("leaf.exe") + "\0")
+            .encode_utf16()
+            .collect::<Vec<u16>>();
 
-    // Применяем олицетворение
-    let impersonation_result = unsafe { ImpersonateLoggedOnUser(token_handle) };
+        // Запуск процесса от имени другого пользователя
+        let result = unsafe {
+            CreateProcessAsUserW(
+                token,
+                std::ptr::null(),
+                command_line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                FALSE,
+                0,
+                std::ptr::null(),
+                std::ptr::null(),
+                &mut startup_info,
+                &mut process_info,
+            )
+        };
 
-    if impersonation_result != 0 {
-        unsafe { winapi::um::handleapi::CloseHandle(token_handle) };
-        let error = unsafe { winapi::um::errhandlingapi::GetLastError() };
-        return Err(format!("Error impersonating user: {}", error).into());
+        if result != FALSE {
+            println!("Процесс запущен!");
+        }
     }
 
     Ok(())
-}
-
-// Функция-заглушка для других платформ
-#[cfg(not(any(unix, windows)))]
-fn switch_to_service_user(_password: &str) -> Result<(), Box<dyn std::error::Error>> {
-    Err(format!("This platform is not supported yet").into())
 }
 
 #[tokio::main]
@@ -157,8 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_prompt("Enter the password")
         .interact()?;
 
-    // Используем введенный пароль для смены пользователя
-    switch_to_service_user(&password)?;
+    switch_user(&password)?;
 
     // Используем тот же пароль для шифрования
     let sharer: Box<dyn SecretSharer> = Box::new(ReedSolomonSecretSharer::new()?);
@@ -198,4 +174,20 @@ async fn recv_file(
     chunks.decrypt(&encryptor)?;
     chunks.into_file(path, &sharer).await?;
     Ok(())
+}
+
+mod errors {
+    use std::error::Error;
+    use std::fmt::{Display, Formatter};
+
+    #[derive(Debug, Clone)]
+    pub struct SwitchUserError;
+
+    impl Display for SwitchUserError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Error switching user of group")
+        }
+    }
+
+    impl Error for SwitchUserError {}
 }
