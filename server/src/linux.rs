@@ -12,8 +12,8 @@ pub async fn run_service() {
         .pid_file("/var/local/leaf/leaf.pid")
         .chown_pid_file(true)
         .working_directory("/var/local/leaf")
-        .user("leaf-client")
-        .group("leaf-client")
+        .user("leaf-server")
+        .group("leaf-server")
         .umask(0o777)
         .stdout(stdout)
         .stderr(stderr);
