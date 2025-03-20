@@ -16,7 +16,6 @@ use common::{
 
 use consts::*;
 use errors::SwitchUserError;
-use nix::libc::{setgid, setuid};
 
 mod consts {
     pub const USER_NAME: &str = "leaf-client";
@@ -53,6 +52,8 @@ pub fn load_args() -> Args {
 
 #[cfg(target_os = "linux")]
 fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use nix::libc::{setgid, setuid};
+
     let uid = users::get_user_by_name(USER_NAME).unwrap();
     let gid = users::get_group_by_name(GROUP_NAME).unwrap();
 
@@ -162,7 +163,7 @@ mod errors {
 
     impl Display for SwitchUserError {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            write!(f, "Error switching user of group")
+            write!(f, "Error switching user or group")
         }
     }
 

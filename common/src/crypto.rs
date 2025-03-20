@@ -21,19 +21,19 @@ use consts::*;
 use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок // Внутренняя зависимость модуля констант
 
 mod consts {
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub const USERNAME_ENV_VAR: &str = "USER";
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     pub const USERNAME_ENV_VAR: &str = "USERNAME";
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     pub const CONFIG_ROOT: &str = "APPDATA";
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub const CONFIG_ROOT: &str = "/etc";
 
     pub const APP_DIR: &str = "leaf";
@@ -63,15 +63,13 @@ pub struct KuznechikEncryptor {
 impl KuznechikEncryptor {
     #[cfg(not(windows))]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
-        println!("Current user: {}", whoami::username());
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
         let username =
             env::var(USERNAME_ENV_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя из переменной среды
         match pam::Client::with_password(PAM_SERVICE_NAME) {
             // Запускаем аутентификацию при помощи PAM
             Ok(mut c) => {
-                c.conversation_mut()
-                    .set_credentials(&username, "n0tp3nt3$t"); // Отправка логина и пароля аутентификатору
+                c.conversation_mut().set_credentials(&username, password); // Отправка логина и пароля аутентификатору
                 c.authenticate()
                     .map_err(|e| InitializationError(e.to_string()))?;
                 Self::initialize(password).await
