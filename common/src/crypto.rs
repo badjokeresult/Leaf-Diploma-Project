@@ -1,4 +1,3 @@
-use std::env; // Зависимость стандартной библиотеки для получения системных переменных среды
 use std::path::PathBuf; // Зависимость стандартной библиотеки для использования структуры по работе с файловыми путями
 
 use tokio::fs; // Внешняя зависимость для асинхронной работы операциями ввода-вывода файловой системы
@@ -22,16 +21,10 @@ use errors::*; // Внутренняя зависимость модуля дл�
 
 mod consts {
     #[cfg(target_os = "linux")]
-    pub const USERNAME_ENV_VAR: &str = "USER";
-
-    #[cfg(target_os = "linux")]
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
     #[cfg(target_os = "windows")]
-    pub const USERNAME_ENV_VAR: &str = "USERNAME";
-
-    #[cfg(target_os = "windows")]
-    pub const CONFIG_ROOT: &str = "APPDATA";
+    pub const CONFIG_ROOT: &str = "C:\\Program Files\\Leaf\\Config";
 
     #[cfg(target_os = "linux")]
     pub const CONFIG_ROOT: &str = "/etc";
@@ -87,8 +80,7 @@ impl KuznechikEncryptor {
 
         use std::ptr::null_mut;
 
-        let username =
-            env::var(USERNAME_ENV_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя при помощи переменной среды
+        let username = whoami::username(); // Получаем имя текущего пользователя при помощи переменной среды
         let mut token_handle = null_mut(); // Создаем пустой указатель для токена авторизации
 
         let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя пользователя в кодировке UTF-16
@@ -166,12 +158,7 @@ impl KuznechikEncryptor {
 
     async fn get_metadata_path() -> Result<PathBuf, InitializationError> {
         // Метод получения пути файла с метаданными
-        #[cfg(not(windows))]
-        let base_path = PathBuf::from(CONFIG_ROOT); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя (реализация для Linux)
-
-        #[cfg(windows)]
-        let base_path =
-            PathBuf::from(env::var(CONFIG_ROOT).map_err(|e| InitializationError(e.to_string()))?); // Получаем полный путь до директории приложений при помощи переменной среды (реализация для Windows)
+        let base_path = PathBuf::from(CONFIG_ROOT); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя
 
         // Создаем директорию нашего приложения
         let app_dir = base_path.join(APP_DIR);

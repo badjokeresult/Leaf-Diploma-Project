@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{channel, Receiver};
 
 // Константы для путей
 #[cfg(target_os = "windows")]
-const APPS_DIR_ABS_PATH: &str = "APPDATA";
+const APPS_DIR_ABS_PATH: &str = "C:\\Program Files";
 #[cfg(target_os = "linux")]
 const APPS_DIR_ABS_PATH: &str = "/var/local";
 
@@ -52,9 +52,6 @@ async fn run_server(shutdown_signal: Arc<AtomicBool>) -> Result<(), Box<dyn std:
     let socket = Socket::new().await?;
     let (tx, rx) = channel(100);
 
-    #[cfg(windows)]
-    let base_path = PathBuf::from(std::env::var(APPS_DIR_ABS_PATH)?);
-    #[cfg(not(windows))]
     let base_path = PathBuf::from(APPS_DIR_ABS_PATH);
 
     let path = base_path.join(APP_DIR).join(CHUNKS_DIR);
