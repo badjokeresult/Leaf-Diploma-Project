@@ -64,6 +64,10 @@ impl KuznechikEncryptor {
     #[cfg(not(windows))]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
+        println!(
+            "Current USER value: {}",
+            env::var(USERNAME_ENV_VAR).unwrap()
+        );
         let username =
             env::var(USERNAME_ENV_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя из переменной среды
         match pam::Client::with_password(PAM_SERVICE_NAME) {
