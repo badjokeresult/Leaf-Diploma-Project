@@ -18,7 +18,7 @@ windows-sys = "0.59.0"
 nix = "0.26.2"
 users = "0.11.0"
 
-[target.'cfg(windows)'.dependecies]
+[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59.0", features = [
     "Win32_Foundation",
     "Win32_Security",
