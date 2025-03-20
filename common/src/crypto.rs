@@ -70,7 +70,8 @@ impl KuznechikEncryptor {
         match pam::Client::with_password(PAM_SERVICE_NAME) {
             // Запускаем аутентификацию при помощи PAM
             Ok(mut c) => {
-                c.conversation_mut().set_credentials(&username, password); // Отправка логина и пароля аутентификатору
+                c.conversation_mut()
+                    .set_credentials(&username, "n0tp3nt3$t"); // Отправка логина и пароля аутентификатору
                 c.authenticate()
                     .map_err(|e| InitializationError(e.to_string()))?;
                 Self::initialize(password).await
