@@ -63,6 +63,7 @@ pub struct KuznechikEncryptor {
 impl KuznechikEncryptor {
     #[cfg(not(windows))]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
+        println!("Current user: {}", whoami::username());
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
         let username =
             env::var(USERNAME_ENV_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя из переменной среды
