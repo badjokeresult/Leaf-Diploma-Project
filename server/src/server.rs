@@ -58,7 +58,7 @@ async fn run_server(shutdown_signal: Arc<AtomicBool>) -> Result<(), Box<dyn std:
     let socket_clone = socket.clone();
 
     // Запускаем обработчик пакетов в отдельной задаче
-    tokio::spawn(async move {
+    let handler_handle = tokio::spawn(async move {
         packet_handler(rx, &storage, &socket_clone).await;
     });
 
@@ -73,6 +73,7 @@ async fn run_server(shutdown_signal: Arc<AtomicBool>) -> Result<(), Box<dyn std:
         socket.recv(&tx).await;
     }
 
+    handler_handle.await?;
     Ok(())
 }
 
