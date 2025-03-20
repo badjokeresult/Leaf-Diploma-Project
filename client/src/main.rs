@@ -68,10 +68,8 @@ fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: заменить на impersonate
     use windows_sys::Win32::Foundation::{FALSE, HANDLE};
     use windows_sys::Win32::Security::{
-        LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-    };
-    use windows_sys::Win32::System::Threading::{
-        CreateProcessAsUserW, PROCESS_INFORMATION, STARTUPINFOW,
+        ImpersonateLoggedOnUser, LogonUserW, RevertToSelf, LOGON32_LOGON_INTERACTIVE,
+        LOGON32_PROVIDER_DEFAULT,
     };
 
     let username = String::from(USER_NAME) + "\0";
@@ -93,36 +91,15 @@ fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if success != FALSE {
-        let mut startup_info: STARTUPINFOW = unsafe { std::mem::zeroed() };
-        startup_info.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-        let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-        let command_line = (String::from("leaf.exe") + "\0")
-            .encode_utf16()
-            .collect::<Vec<u16>>();
-
         // Запуск процесса от имени другого пользователя
-        let result = unsafe {
-            CreateProcessAsUserW(
-                token,
-                std::ptr::null(),
-                command_line.as_mut_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                FALSE,
-                0,
-                std::ptr::null(),
-                std::ptr::null(),
-                &mut startup_info,
-                &mut process_info,
-            )
-        };
+        let result = ImpersonateLoggedOnUser(token);
 
         if result != FALSE {
-            println!("Процесс запущен!");
+            return Ok(());
         }
     }
 
-    Ok(())
+    Err(Box::new(SwitchUserError))
 }
 
 #[tokio::main]

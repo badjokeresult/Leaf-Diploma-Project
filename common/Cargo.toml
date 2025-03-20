@@ -20,7 +20,10 @@ zstd = "0.13.2"
 pnet = "0.35"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
+windows-sys = { version = "0.59.0", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+] }
 
 [target.'cfg(not(windows))'.dependencies]
 pam = "0.8.0"
