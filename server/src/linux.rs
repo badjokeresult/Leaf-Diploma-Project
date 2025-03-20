@@ -1,7 +1,7 @@
 use crate::server::AsyncServer;
 use daemonize::Daemonize;
 use log::{error, info};
-use std::fs::File;
+use std::{fs::File, sync::atomic::Ordering::SeqCst};
 use tokio::signal::unix::{signal, SignalKind};
 
 pub async fn run_service() {
@@ -29,7 +29,11 @@ pub async fn run_service() {
 async fn service_main_loop() {
     // Создаем экземпляр сервера
     let server = AsyncServer::new();
-    server.get_shutdown_signal();
+    let shutdown_signal = server.get_shutdown_signal();
+
+    let server_handle = tokio::spawn(async move {
+        server.run().await;
+    });
 
     // Настраиваем обработку сигналов SIGTERM и SIGINT
     let mut sigterm =
@@ -39,17 +43,18 @@ async fn service_main_loop() {
 
     // Запускаем сервер и обработку сигналов в отдельных тасках
     tokio::select! {
-        _ = server.run() => {
-            info!("Сервер завершил работу");
-        }
         _ = sigterm.recv() => {
             info!("Получен сигнал SIGTERM");
-            server.shutdown();
+            shutdown_signal.store(true, SeqCst);
         }
         _ = sigint.recv() => {
             info!("Получен сигнал SIGINT");
-            server.shutdown();
+            shutdown_signal.store(true, SeqCst);
         }
+    }
+
+    if let Err(e) = server_handle.await {
+        error!("Error: {}", e);
     }
 
     info!("Linux-служба завершена");

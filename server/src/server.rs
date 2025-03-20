@@ -19,6 +19,7 @@ const APP_DIR: &str = "leaf";
 const CHUNKS_DIR: &str = "chunks";
 
 // Структура AsyncServer, которая управляет жизненным циклом сервера
+#[derive(Clone)]
 pub struct AsyncServer {
     shutdown_signal: Arc<AtomicBool>,
 }
@@ -40,10 +41,6 @@ impl AsyncServer {
             Ok(_) => info!("Сервер завершил работу успешно"),
             Err(e) => error!("Ошибка сервера: {}", e),
         }
-    }
-
-    pub fn shutdown(&self) {
-        self.shutdown_signal.store(true, Ordering::SeqCst);
     }
 }
 
