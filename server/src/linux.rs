@@ -5,13 +5,13 @@ use std::fs::File;
 use tokio::signal::unix::{signal, SignalKind};
 
 pub async fn run_service() {
-    let stdout = File::create("/tmp/leaf.out").unwrap();
-    let stderr = File::create("/tmp/leaf.err").unwrap();
+    let stdout = File::create("/var/local/leaf/leaf.out").unwrap();
+    let stderr = File::create("/var/local/leaf/leaf.err").unwrap();
 
     let daemonize = Daemonize::new()
-        .pid_file("/tmp/leaf.pid")
+        .pid_file("/var/local/leaf/leaf.pid")
         .chown_pid_file(true)
-        .working_directory("/tmp")
+        .working_directory("/var/local/leaf")
         .user("leaf-client")
         .group("leaf-client")
         .umask(0o777)
