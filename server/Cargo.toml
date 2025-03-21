@@ -12,6 +12,11 @@ clap = { workspace = true }
 clap_derive = { workspace = true }
 log = "0.4"
 env_logger = "0.10"
+signal-hook = "0.3.17"
+signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+nix = "0.29.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.0"
