@@ -1,5 +1,5 @@
 [package]
-name = "common"
+name = "leafcommon"
 version = "0.1.0"
 edition = "2021"
 
@@ -30,5 +30,5 @@ windows-sys = { version = "0.59.0", features = [
 pam = "0.8.0"
 
 [lib]
-name = "common"
+name = "leafcommon"
 crate-type = ["rlib"]

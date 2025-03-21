@@ -9,7 +9,7 @@ use clap_derive::{Parser, ValueEnum};
 use dialoguer::theme::ColorfulTheme; // Внешние зависимости для работы с безопасным пользовательским вводом в терминале
 use dialoguer::Password;
 
-use common::{
+use leafcommon::{
     // Зависимости внутренней библиотеки проекта
     Chunks,
     ChunksHashes,
