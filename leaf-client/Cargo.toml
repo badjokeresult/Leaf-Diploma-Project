@@ -1,5 +1,5 @@
 [package]
-name = "client"
+name = "leaf-client"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,9 +8,6 @@ tokio = { workspace = true }
 common = { path = "../common" }
 clap_derive = { workspace = true }
 clap = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-base64 = { workspace = true }
 dialoguer = "0.11.0"
 
 [target.'cfg(unix)'.dependencies]
@@ -24,4 +21,4 @@ windows-sys = { version = "0.59.0", features = [
 ] }
 
 [[bin]]
-name = "client"
+name = "leaf-client"
