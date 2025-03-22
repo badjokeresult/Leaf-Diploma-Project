@@ -40,10 +40,10 @@ struct EncryptionMetadata {
     salt: Vec<u8>,  // Закодированная по Base64 соль
 }
 
-pub trait Encryptor {
+pub trait Encryptor<V> {
     // Трейт для структур, реализующих шифрование
-    fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8>; // Прототип метода шифрования массива данных
-    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DecryptionError>; // Прототип метода дешифрования массива данных
+    fn encrypt_chunk(&self, chunk: &[u8]) -> V; // Прототип метода шифрования массива данных
+    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<V, DecryptionError>; // Прототип метода дешифрования массива данных
 }
 
 pub struct KuznechikEncryptor {
@@ -213,7 +213,7 @@ impl KuznechikEncryptor {
     }
 }
 
-impl Encryptor for KuznechikEncryptor {
+impl Encryptor<Vec<u8>> for KuznechikEncryptor {
     // Блок реализации трейта для структуры
     fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8> {
         // Метод шифрования данных на месте
@@ -272,11 +272,12 @@ impl Encryptor for KuznechikEncryptor {
     }
 }
 
-pub trait Hasher {
+pub trait Hasher<V> {
     // Трейт для структур, реализующий вычисление хэш-суммы
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> String; // Метод вычисления хэш-суммы
+    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> V; // Метод вычисления хэш-суммы
 }
 
+#[derive(Clone)]
 pub struct StreebogHasher; // Структура для вычисления хэш-суммы
 
 impl StreebogHasher {
@@ -286,7 +287,7 @@ impl StreebogHasher {
     }
 }
 
-impl Hasher for StreebogHasher {
+impl Hasher<String> for StreebogHasher {
     // Реализация трейта
     fn calc_hash_for_chunk(&self, chunk: &[u8]) -> String {
         // Метод вычисления хэш-суммы

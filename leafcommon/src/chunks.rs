@@ -1,96 +1,99 @@
-#![allow(refining_impl_trait)]
+#![allow(refining_impl_trait)] // Разрешение на уточнение типов в реализациях трейтов
 
-use std::error::Error;
-use std::future::Future;
-use std::net::IpAddr;
-use std::path::Path;
-use std::time::Duration;
+use std::error::Error; // Трейт ошибок стандартной библиотеки
+use std::future::Future; // Трейт асинхронных операций стандартной библиотеки
+use std::net::IpAddr; // Перечисление с типами IP-адресов
+use std::path::Path; // Структура "сырого" файлового пути
+use std::time::Duration; // Структура с длительностью ожидания
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use serde::{Deserialize, Serialize};
-use tokio::fs;
-use tokio::net::UdpSocket;
-use tokio::time;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _}; // BASE64-кодек
+use serde::{Deserialize, Serialize}; // Трейты (де)сериализации
+use tokio::fs; // Асинхронные операции с файловой системой
+use tokio::net::UdpSocket; // Асинхронный UDP-сокет
+use tokio::time; // Асинхронное ожидание
 
-use crate::crypto::{Encryptor, Hasher};
-use crate::message::Message;
-use crate::shards::SecretSharer;
+use crate::crypto::{Encryptor, Hasher}; // Трейты шифровальщика и хэш-вычислителя
+use crate::message::Message; // Перечисление сообщений
+use crate::shards::SecretSharer; // Трейт разделителя секрета
 
-use consts::*;
-use errors::*;
+use consts::*; // Внутренние константы
+use errors::*; // Внутренние ошибки
 
 mod consts {
-    pub const BROADCAST_ADDR: &str = "255.255.255.255:62092";
-    pub const MAX_UDP_PACKET_SIZE: usize = 65535;
+    pub const BROADCAST_ADDR: &str = "255.255.255.255:62092"; // Широковещательный адрес локальной сети с портом
+    pub const MAX_UDP_PACKET_SIZE: usize = 65535; // Максимальный размер данных по UDP
 }
 
-pub trait ChunkHash {
-    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> impl ChunkHash;
-    fn get_value(&self) -> String;
-    fn get_size(&self) -> usize;
+pub trait ChunkHash<V, S> {
+    // Трейт хэша одного чанка
+    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> Self
+    where
+        Self: Sized; // Метод получения хэша из чанка
+    fn get_value(&self) -> V; // Получение значения хэша
+    fn get_size(&self) -> S; // Получение размера чанка
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct ReedSolomonChunkHash {
-    value: String,
-    size: usize,
+    // Структура хэша чанка, полученного по Риду-Соломону
+    value: String, // Значение хэша
+    size: usize,   // Размер изначального чанка
 }
 
-impl ChunkHash for ReedSolomonChunkHash {
-    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> ReedSolomonChunkHash {
-        let value = hasher.calc_hash_for_chunk(chunk);
+impl ChunkHash<String, usize> for ReedSolomonChunkHash {
+    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> Self {
+        let value = hasher.calc_hash_for_chunk(chunk); // Вычисление хэша
         ReedSolomonChunkHash {
+            // Создание объекта структуры
             value,
             size: chunk.len(),
         }
     }
 
     fn get_value(&self) -> String {
-        self.value.clone()
+        self.value.clone() // Получение глубокой копии значения
     }
 
     fn get_size(&self) -> usize {
-        self.size
+        self.size // Получение размера чанка
     }
 }
 
-pub trait Chunk {
-    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
-    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
-    fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>;
+pub trait Chunk<H> {
+    // Трейт чанка
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>; // Метод шифрования чанка
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>; // Метод дешифрования чанка
+    fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>; // Метод обновления хэш-суммы чанка
     fn send(
         self,
         socket: &UdpSocket,
         localaddr: IpAddr,
-    ) -> impl Future<Output = Result<impl ChunkHash, Box<dyn Error>>>;
-    fn recv(
-        socket: &UdpSocket,
-        hash: &impl ChunkHash,
-    ) -> impl Future<Output = Result<impl Chunk, Box<dyn Error>>>;
+    ) -> impl Future<Output = Result<H, Box<dyn Error>>>; // Метод отправки чанка в сеть
+    fn recv(socket: &UdpSocket, hash: &H) -> impl Future<Output = Result<Self, Box<dyn Error>>>
+    where
+        Self: Sized; // Метод получения чанка из сети
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct ReedSolomonChunk {
-    value: Vec<u8>,
-    hash: Option<ReedSolomonChunkHash>,
+    // Структура чанка по Риду-Соломону
+    value: Vec<u8>,                     // Данные
+    hash: Option<ReedSolomonChunkHash>, // Хэш чанка (при создании равен None)
 }
 
-impl Chunk for ReedSolomonChunk {
+impl Chunk<ReedSolomonChunkHash> for ReedSolomonChunk {
     fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
-        self.value = encryptor.encrypt_chunk(&self.value);
+        self.value = encryptor.encrypt_chunk(&self.value); // Переписываем значение на созданное шифровальщиком
         Ok(())
     }
 
     fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
-        self.value = decryptor.decrypt_chunk(&self.value)?;
+        self.value = decryptor.decrypt_chunk(&self.value)?; // Переписываем значение на созданное дешифровальщиком
         Ok(())
     }
 
     fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>> {
-        self.hash = Some(ReedSolomonChunkHash {
-            value: hasher.calc_hash_for_chunk(&self.value),
-            size: self.value.len(),
-        });
+        self.hash = Some(ReedSolomonChunkHash::from_chunk(&self.value, hasher)); // Получаем значение хэша в Some
         Ok(())
     }
 
@@ -100,16 +103,20 @@ impl Chunk for ReedSolomonChunk {
         localaddr: IpAddr,
     ) -> Result<ReedSolomonChunkHash, Box<dyn Error>> {
         let req: Vec<u8> =
-            Message::SendingReq(self.hash.clone().unwrap().get_value()).into_bytes()?;
-        socket.send_to(&req, BROADCAST_ADDR).await?;
-        let mut ack = [0u8; MAX_UDP_PACKET_SIZE];
+            Message::SendingReq(self.hash.clone().unwrap().get_value()).into_bytes()?; // Формируем сообщение SENDING_REQ и преобразуем его в поток байт
+        socket.send_to(&req, BROADCAST_ADDR).await?; // Отправляем сообщение в широковещательный домен
+        let mut ack = [0u8; MAX_UDP_PACKET_SIZE]; // Создаем буфер для получения ответа
         while let Ok((sz, addr)) =
             time::timeout(Duration::from_secs(5), socket.recv_from(&mut ack)).await?
+        // Ожидаем ответ в течение 5 секунд
         {
-            let ack = Message::from_bytes(ack[..sz].to_vec())?;
+            let ack = Message::from_bytes(ack[..sz].to_vec())?; // Формируем сообщение из полученных данных
             if !localaddr.eq(&addr.ip()) {
+                // Проверяем, что мы не производим обмен сами с собой
                 if let Message::SendingAck(h) = ack {
+                    // Если сообщение имеет тип SENDING_ACK
                     if h.eq(&self.hash.clone().unwrap().get_value()) {
+                        //
                         let content: Vec<u8> = Message::ContentFilled(
                             self.hash.clone().unwrap().get_value(),
                             self.value,
@@ -126,7 +133,7 @@ impl Chunk for ReedSolomonChunk {
 
     async fn recv(
         socket: &UdpSocket,
-        hash: &impl ChunkHash,
+        hash: &ReedSolomonChunkHash,
     ) -> Result<ReedSolomonChunk, Box<dyn Error>> {
         let req: Vec<u8> = Message::RetrievingReq(hash.get_value()).into_bytes()?; // Создание запроса на получение
         socket.send_to(&req, BROADCAST_ADDR).await?; // Отправка сообщения на широковещательный адрес
@@ -159,11 +166,13 @@ impl Chunk for ReedSolomonChunk {
     }
 }
 
-pub trait Chunks {
+pub trait Chunks<H> {
     fn from_file(
         path: impl AsRef<Path>,
         sharer: &Box<dyn SecretSharer>,
-    ) -> impl Future<Output = Result<impl Chunks, Box<dyn Error>>>;
+    ) -> impl Future<Output = Result<Self, Box<dyn Error>>>
+    where
+        Self: Sized;
     fn into_file(
         self,
         path: impl AsRef<Path>,
@@ -172,9 +181,10 @@ pub trait Chunks {
     fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
     fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
     fn update_hashes(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>;
-    fn send(self) -> impl Future<Output = Result<impl ChunksHashes, Box<dyn Error>>>;
-    fn recv(hashes: impl ChunksHashes)
-        -> impl Future<Output = Result<impl Chunks, Box<dyn Error>>>;
+    fn send(self) -> impl Future<Output = Result<H, Box<dyn Error>>>;
+    fn recv(hashes: H) -> impl Future<Output = Result<Self, Box<dyn Error>>>
+    where
+        Self: Sized;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -183,7 +193,7 @@ pub struct ReedSolomonChunks {
     recv: Vec<ReedSolomonChunk>,
 }
 
-impl Chunks for ReedSolomonChunks {
+impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
     async fn from_file(
         path: impl AsRef<Path>,
         sharer: &Box<dyn SecretSharer>,
@@ -292,7 +302,7 @@ impl Chunks for ReedSolomonChunks {
         })
     }
 
-    async fn recv(hashes: impl ChunksHashes) -> Result<ReedSolomonChunks, Box<dyn Error>> {
+    async fn recv(hashes: ReedSolomonChunksHashes) -> Result<ReedSolomonChunks, Box<dyn Error>> {
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
         socket.set_broadcast(true)?;
         let mut data = Vec::with_capacity(hashes.len());
@@ -338,14 +348,14 @@ impl Chunks for ReedSolomonChunks {
     }
 }
 
-pub trait ChunksHashes {
+pub trait ChunksHashes<H> {
     fn save_to(self, path: impl AsRef<Path>) -> impl Future<Output = Result<(), Box<dyn Error>>>;
-    fn load_from(
-        path: impl AsRef<Path>,
-    ) -> impl Future<Output = Result<impl ChunksHashes, Box<dyn Error>>>;
+    fn load_from(path: impl AsRef<Path>) -> impl Future<Output = Result<Self, Box<dyn Error>>>
+    where
+        Self: Sized;
     fn len(&self) -> usize;
-    fn get_data_hash(&self, index: usize) -> impl ChunkHash;
-    fn get_recv_hash(&self, index: usize) -> impl ChunkHash;
+    fn get_data_hash(&self, index: usize) -> H;
+    fn get_recv_hash(&self, index: usize) -> H;
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -354,7 +364,7 @@ pub struct ReedSolomonChunksHashes {
     recv: Vec<ReedSolomonChunkHash>,
 }
 
-impl ChunksHashes for ReedSolomonChunksHashes {
+impl ChunksHashes<ReedSolomonChunkHash> for ReedSolomonChunksHashes {
     async fn save_to(self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
         let data = BASE64.encode(serde_json::to_vec(&self)?);
         fs::write(path, &data).await?;
@@ -371,11 +381,11 @@ impl ChunksHashes for ReedSolomonChunksHashes {
         self.data.len()
     }
 
-    fn get_data_hash(&self, index: usize) -> impl ChunkHash {
+    fn get_data_hash(&self, index: usize) -> ReedSolomonChunkHash {
         self.data[index].clone()
     }
 
-    fn get_recv_hash(&self, index: usize) -> impl ChunkHash {
+    fn get_recv_hash(&self, index: usize) -> ReedSolomonChunkHash {
         self.recv[index].clone()
     }
 }

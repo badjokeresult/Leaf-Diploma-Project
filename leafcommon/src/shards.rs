@@ -25,16 +25,10 @@ mod consts {
     pub const MAX_AMOUNT_OF_BLOCKS: usize = 128;
 }
 
-pub trait SecretSharer {
+pub trait SecretSharer<C, V> {
     // Трейт, которому должна удовлетворять структура
-    fn split_into_chunks(
-        &self,
-        secret: &[u8],
-    ) -> Result<(ByteStream, ByteStream), DataSplittingError>; // Метод для разбиения файлов на куски
-    fn recover_from_chunks(
-        &self,
-        blocks: (ByteStream, ByteStream),
-    ) -> Result<Vec<u8>, DataRecoveringError>; // Метод восстановления файлов из блоков
+    fn split_into_chunks(&self, secret: &[u8]) -> Result<(C, C), DataSplittingError>; // Метод для разбиения файлов на куски
+    fn recover_from_chunks(&self, blocks: (C, C)) -> Result<V, DataRecoveringError>; // Метод восстановления файлов из блоков
 }
 
 pub struct ReedSolomonSecretSharer; // Структура схемы Рида-Соломона
@@ -55,7 +49,7 @@ impl ReedSolomonSecretSharer {
     }
 }
 
-impl SecretSharer for ReedSolomonSecretSharer {
+impl SecretSharer<ByteStream, Vec<u8>> for ReedSolomonSecretSharer {
     // Реализация трейта
     fn split_into_chunks(
         &self,
