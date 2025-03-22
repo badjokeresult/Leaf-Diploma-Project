@@ -56,7 +56,6 @@ impl Server {
         while let Some(p) = rx.recv().await {
             // Выходим из цикла, если получен сигнал завершения
             if shutdown.load(Ordering::Relaxed) {
-                println!("Packet handler shutting down...");
                 break;
             }
 
@@ -75,7 +74,6 @@ impl Server {
         socket: &Socket,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (data, addr) = packet.deconstruct(); // Разбираем пакет на данные и адрес источника
-        println!("Received {} bytes", data.len());
         let message = Message::from_bytes(data)?; // Восстанавливаем сообщение из потока байт
         match message.clone() {
             Message::SendingReq(h) => {
@@ -83,7 +81,6 @@ impl Server {
                 if storage.can_save().await? {
                     // Проверка доступного места на диске
                     let ack = Message::SendingAck(h).into_bytes()?; // Создание сообщения подтверждения хранения и перевод его в поток байт
-                    println!("Sent {} bytes", ack.len());
                     let packet = Packet::new(ack, addr); // Сбор нового пакета
                     socket.send(packet).await?; // Отправка пакета сокету
                     return Ok(()); // Возврат
@@ -95,7 +92,6 @@ impl Server {
                 if let Ok(d) = storage.get(&h).await {
                     // Если в хранилище есть такой хэш
                     let message = Message::ContentFilled(h.clone(), d).into_bytes()?; // Создание сообщения с данными и перевод его в поток байт
-                    println!("Sent {} bytes", message.len());
                     let packet = Packet::new(message, addr); // Сбор нового пакета
                     socket.send(packet).await?; // Отправка пакета в сокет
                     return Ok(()); // Возврат

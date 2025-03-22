@@ -7,6 +7,8 @@ use std::path::Path; // Структура "сырого" файлового п�
 use std::time::Duration; // Структура с длительностью ожидания
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _}; // BASE64-кодек
+use futures::future;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize}; // Трейты (де)сериализации
 use tokio::fs; // Асинхронные операции с файловой системой
 use tokio::net::UdpSocket; // Асинхронный UDP-сокет
@@ -20,6 +22,7 @@ use consts::*; // Внутренние константы
 use errors::*; // Внутренние ошибки
 
 mod consts {
+    pub const CLIENT_ADDR: &str = "0.0.0.0:0";
     pub const BROADCAST_ADDR: &str = "255.255.255.255:62092"; // Широковещательный адрес локальной сети с портом
     pub const MAX_UDP_PACKET_SIZE: usize = 65535; // Максимальный размер данных по UDP
 }
@@ -202,14 +205,14 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
         let (data, recv) = sharer.split_into_chunks(&content)?;
         Ok(ReedSolomonChunks {
             data: data
-                .iter()
+                .par_iter()
                 .map(|x| ReedSolomonChunk {
                     value: x.clone(),
                     hash: None,
                 })
                 .collect::<Vec<_>>(),
             recv: recv
-                .iter()
+                .par_iter()
                 .map(|x| ReedSolomonChunk {
                     value: x.clone(),
                     hash: None,
@@ -225,12 +228,12 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
     ) -> Result<(), Box<dyn Error>> {
         let data = self
             .data
-            .iter()
+            .par_iter()
             .map(|x| x.value.clone())
             .collect::<Vec<_>>();
         let recv = self
             .recv
-            .iter()
+            .par_iter()
             .map(|x| x.value.clone())
             .collect::<Vec<_>>();
 
@@ -241,39 +244,30 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
     }
 
     fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
-        for c in &mut self.data {
-            c.encrypt(encryptor)?;
-        }
-        for c in &mut self.recv {
-            c.encrypt(encryptor)?;
-        }
-        Ok(())
+        self.data
+            .iter_mut()
+            .chain(self.recv.iter_mut())
+            .try_for_each(|c| c.encrypt(encryptor))
     }
 
     fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
-        for c in &mut self.data {
-            c.decrypt(decryptor)?;
-        }
-        for c in &mut self.recv {
-            c.decrypt(decryptor)?;
-        }
-        Ok(())
+        self.data
+            .iter_mut()
+            .chain(self.recv.iter_mut())
+            .try_for_each(|c| c.decrypt(decryptor))
     }
 
     fn update_hashes(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>> {
-        for c in &mut self.data {
-            c.update_hash(hasher)?;
-        }
-        for c in &mut self.recv {
-            c.update_hash(hasher)?;
-        }
-        Ok(())
+        self.data
+            .iter_mut()
+            .chain(self.recv.iter_mut())
+            .try_for_each(|c| c.update_hash(hasher))
     }
 
     async fn send(self) -> Result<ReedSolomonChunksHashes, Box<dyn Error>> {
         let localaddr = pnet::datalink::interfaces()
-            .iter()
-            .find(|i| !i.is_loopback() && !i.ips.is_empty())
+            .par_iter()
+            .find_first(|i| !i.is_loopback() && !i.ips.is_empty())
             .map_or(
                 Err(SendingChunkError(String::from("No interface found"))),
                 |x| Ok(x),
@@ -285,17 +279,14 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
             })?
             .ip();
 
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let socket = UdpSocket::bind(CLIENT_ADDR).await?;
         socket.set_broadcast(true)?;
 
-        let mut data_hashes = Vec::with_capacity(self.data.len());
-        for c in self.data {
-            data_hashes.push(c.send(&socket, localaddr).await?);
-        }
-        let mut recv_hashes = Vec::with_capacity(self.recv.len());
-        for c in self.recv {
-            recv_hashes.push(c.send(&socket, localaddr).await?);
-        }
+        let data_hashes =
+            future::try_join_all(self.data.into_iter().map(|c| c.send(&socket, localaddr))).await?;
+        let recv_hashes =
+            future::try_join_all(self.recv.into_iter().map(|c| c.send(&socket, localaddr))).await?;
+
         Ok(ReedSolomonChunksHashes {
             data: data_hashes,
             recv: recv_hashes,
@@ -303,7 +294,7 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
     }
 
     async fn recv(hashes: ReedSolomonChunksHashes) -> Result<ReedSolomonChunks, Box<dyn Error>> {
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let socket = UdpSocket::bind(CLIENT_ADDR).await?;
         socket.set_broadcast(true)?;
         let mut data = Vec::with_capacity(hashes.len());
         let mut non_received_data_indexes = Vec::with_capacity(hashes.len());

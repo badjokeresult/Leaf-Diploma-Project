@@ -37,9 +37,8 @@ pub fn service_main(_arguments: Vec<OsString>) {
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
             ServiceControl::Stop => {
-                info!("Получен сигнал остановки службы, завершаем работу...");
                 if let Err(e) = shutdown_tx.send(()) {
-                    error!("Ошибка при отправке сигнала завершения: {}", e);
+                    eprintln!("Ошибка при отправке сигнала завершения: {}", e);
                 }
                 ServiceControlHandlerResult::NoError
             }
@@ -52,7 +51,7 @@ pub fn service_main(_arguments: Vec<OsString>) {
     let status_handle = match service_control_handler::register(SERVICE_NAME, event_handler) {
         Ok(handle) => handle,
         Err(e) => {
-            error!("Ошибка при регистрации обработчика службы: {}", e);
+            eprintln!("Ошибка при регистрации обработчика службы: {}", e);
             return;
         }
     };

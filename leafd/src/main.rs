@@ -73,17 +73,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Обработка полученных данных продолжается
                 }
                 _ = sigterm.recv() => {
-                    println!("Received SIGTERM, shutting down gracefully...");
                     shutdown.store(true, Ordering::Relaxed);
                     break;
                 }
                 _ = sigint.recv() => {
-                    println!("Received SIGINT, shutting down gracefully...");
                     shutdown.store(true, Ordering::Relaxed);
                     break;
                 }
                 _ = sighup.recv() => {
-                    println!("Received SIGHUP, reloading configuration...");
                     // Здесь могла бы быть логика перезагрузки конфигурации
                 }
             }
@@ -105,7 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Failed to notify systemd about stopping: {}", e);
     }
 
-    println!("Server shut down gracefully");
     Ok(())
 }
 

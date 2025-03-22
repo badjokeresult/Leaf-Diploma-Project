@@ -134,13 +134,11 @@ impl SecretSharer<ByteStream, Vec<u8>> for ReedSolomonSecretSharer {
             .filter_map(|x| x)
             .flatten()
             .collect::<Vec<_>>();
-        println!("{}", content.len());
         // Удаление нулей в конце последовательности
-        let content = match content.iter().rposition(|x| 0u8.eq(x)) {
+        let content = match content.iter().position(|x| 0u8.eq(x)) {
             Some(p) => content.split_at(p).0.to_vec(),
             None => content,
         };
-        println!("{}", content.len());
         Ok(content)
     }
 }

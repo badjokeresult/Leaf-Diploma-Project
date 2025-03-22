@@ -21,7 +21,6 @@ pub fn notify_systemd(state: &str) -> Result<(), Box<dyn std::error::Error>> {
         // Отправляем сообщение в systemd
         socket.send_to(state.as_bytes(), socket_addr)?;
 
-        println!("Sent systemd notification: {}", state);
         Ok(())
     } else {
         // Не запущено под systemd
@@ -57,7 +56,6 @@ pub async fn setup_watchdog(shutdown: Arc<AtomicBool>) {
 
     // Преобразуем микросекунды в миллисекунды и делим на 2 для безопасности
     let interval_ms = watchdog_usec / 1000 / 2;
-    println!("Watchdog timer set to {} ms", interval_ms);
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(interval_ms));

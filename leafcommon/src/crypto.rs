@@ -24,12 +24,16 @@ mod consts {
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
     #[cfg(target_os = "windows")]
-    pub const CONFIG_ROOT: &str = "C:\\Program Files\\Leaf\\Config";
+    pub const CONFIG_ROOT: &str = "C:\\Program Files";
 
     #[cfg(target_os = "linux")]
     pub const CONFIG_ROOT: &str = "/etc";
 
+    #[cfg(target_os = "linux")]
     pub const APP_DIR: &str = "leaf";
+    #[cfg(target_os = "windows")]
+    pub const APP_DIR: &str = "Leaf\\Config";
+
     pub const METADATA_PATH: &str = "metadata.bin";
 }
 
