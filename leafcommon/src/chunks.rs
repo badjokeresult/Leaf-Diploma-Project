@@ -26,7 +26,7 @@ mod consts {
 
 pub trait ChunkHash<V, S> {
     // Трейт хэша одного чанка
-    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> Self
+    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher<String>>) -> Self
     where
         Self: Sized; // Метод получения хэша из чанка
     fn get_value(&self) -> V; // Получение значения хэша
@@ -41,7 +41,7 @@ pub struct ReedSolomonChunkHash {
 }
 
 impl ChunkHash<String, usize> for ReedSolomonChunkHash {
-    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher>) -> Self {
+    fn from_chunk(chunk: &[u8], hasher: &Box<dyn Hasher<String>>) -> Self {
         let value = hasher.calc_hash_for_chunk(chunk); // Вычисление хэша
         ReedSolomonChunkHash {
             // Создание объекта структуры
@@ -61,9 +61,9 @@ impl ChunkHash<String, usize> for ReedSolomonChunkHash {
 
 pub trait Chunk<H> {
     // Трейт чанка
-    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>; // Метод шифрования чанка
-    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>; // Метод дешифрования чанка
-    fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>; // Метод обновления хэш-суммы чанка
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>; // Метод шифрования чанка
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>; // Метод дешифрования чанка
+    fn update_hash(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>>; // Метод обновления хэш-суммы чанка
     fn send(
         self,
         socket: &UdpSocket,
@@ -82,17 +82,17 @@ pub struct ReedSolomonChunk {
 }
 
 impl Chunk<ReedSolomonChunkHash> for ReedSolomonChunk {
-    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
         self.value = encryptor.encrypt_chunk(&self.value); // Переписываем значение на созданное шифровальщиком
         Ok(())
     }
 
-    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
         self.value = decryptor.decrypt_chunk(&self.value)?; // Переписываем значение на созданное дешифровальщиком
         Ok(())
     }
 
-    fn update_hash(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>> {
+    fn update_hash(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>> {
         self.hash = Some(ReedSolomonChunkHash::from_chunk(&self.value, hasher)); // Получаем значение хэша в Some
         Ok(())
     }
@@ -169,18 +169,18 @@ impl Chunk<ReedSolomonChunkHash> for ReedSolomonChunk {
 pub trait Chunks<H> {
     fn from_file(
         path: impl AsRef<Path>,
-        sharer: &Box<dyn SecretSharer>,
+        sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
     ) -> impl Future<Output = Result<Self, Box<dyn Error>>>
     where
         Self: Sized;
     fn into_file(
         self,
         path: impl AsRef<Path>,
-        sharer: &Box<dyn SecretSharer>,
+        sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
     ) -> impl Future<Output = Result<(), Box<dyn Error>>>;
-    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
-    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>>;
-    fn update_hashes(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>>;
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>;
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>;
+    fn update_hashes(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>>;
     fn send(self) -> impl Future<Output = Result<H, Box<dyn Error>>>;
     fn recv(hashes: H) -> impl Future<Output = Result<Self, Box<dyn Error>>>
     where
@@ -196,7 +196,7 @@ pub struct ReedSolomonChunks {
 impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
     async fn from_file(
         path: impl AsRef<Path>,
-        sharer: &Box<dyn SecretSharer>,
+        sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
     ) -> Result<ReedSolomonChunks, Box<dyn Error>> {
         let content = fs::read(path).await?;
         let (data, recv) = sharer.split_into_chunks(&content)?;
@@ -221,7 +221,7 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
     async fn into_file(
         self,
         path: impl AsRef<Path>,
-        sharer: &Box<dyn SecretSharer>,
+        sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
     ) -> Result<(), Box<dyn Error>> {
         let data = self
             .data
@@ -240,7 +240,7 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
         Ok(())
     }
 
-    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
         for c in &mut self.data {
             c.encrypt(encryptor)?;
         }
@@ -250,7 +250,7 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
         Ok(())
     }
 
-    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor>) -> Result<(), Box<dyn Error>> {
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
         for c in &mut self.data {
             c.decrypt(decryptor)?;
         }
@@ -260,7 +260,7 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
         Ok(())
     }
 
-    fn update_hashes(&mut self, hasher: &Box<dyn Hasher>) -> Result<(), Box<dyn Error>> {
+    fn update_hashes(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>> {
         for c in &mut self.data {
             c.update_hash(hasher)?;
         }
