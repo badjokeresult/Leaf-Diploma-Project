@@ -133,14 +133,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     switch_user(&password)?; // Выполняем смену пользователя на сервисную УЗ
 
     // Используем тот же пароль для шифрования
-    let sharer: Box<dyn SecretSharer> = Box::new(ReedSolomonSecretSharer::new()?); // Создаем объекты разделителя секрета, шифровальщика
-    let encryptor: Box<dyn Encryptor> = Box::new(KuznechikEncryptor::new(&password).await?);
+    let sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>> =
+        Box::new(ReedSolomonSecretSharer::new()?); // Создаем объекты разделителя секрета, шифровальщика
+    let encryptor: Box<dyn Encryptor<Vec<u8>>> =
+        Box::new(KuznechikEncryptor::new(&password).await?);
     let path = args.get_file(); // Получаем путь к файлу
 
     match args.get_action() {
         Action::Send => {
             // Если файл отправляется
-            let hasher: Box<dyn Hasher> = Box::new(StreebogHasher::new()); // Дополнительно создаем объект хэш-вычислителя
+            let hasher: Box<dyn Hasher<String>> = Box::new(StreebogHasher::new()); // Дополнительно создаем объект хэш-вычислителя
             send_file(path, sharer, encryptor, hasher).await // Отправляем файл
         }
         Action::Receive => recv_file(path, sharer, encryptor).await, // Если получение - вызываем функцию получения
@@ -149,9 +151,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn send_file(
     path: impl AsRef<Path>,
-    sharer: Box<dyn SecretSharer>,
-    encryptor: Box<dyn Encryptor>,
-    hasher: Box<dyn Hasher>,
+    sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
+    encryptor: Box<dyn Encryptor<Vec<u8>>>,
+    hasher: Box<dyn Hasher<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Функция отправки файла
     let mut chunks = ReedSolomonChunks::from_file(&path, &sharer).await?; // Получаем чанки
@@ -164,8 +166,8 @@ async fn send_file(
 
 async fn recv_file(
     path: impl AsRef<Path>,
-    sharer: Box<dyn SecretSharer>,
-    encryptor: Box<dyn Encryptor>,
+    sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
+    encryptor: Box<dyn Encryptor<Vec<u8>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Функция получения файла
     let hashes = ReedSolomonChunksHashes::load_from(&path).await?; // Получаем хэш-суммы из файла
