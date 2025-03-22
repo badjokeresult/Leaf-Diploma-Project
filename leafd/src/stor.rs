@@ -21,6 +21,7 @@ pub trait ServerStorage {
     async fn can_save(&self) -> Result<bool, SavingDataError>; // Шаблон метода проверки возможности сохранения
 }
 
+#[derive(Clone)]
 pub struct UdpServerStorage {
     // Структура серверного хранилища
     hasher: StreebogHasher, // Поле с вычислителем хэша

@@ -1,5 +1,5 @@
 [package]
-name = "server"
+name = "leafd"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,14 +10,10 @@ leafcommon = { path = "../leafcommon" }
 walkdir = "2.5.0"
 clap = { workspace = true }
 clap_derive = { workspace = true }
-#log = "0.4"
-#env_logger = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.0"
-
-[target.'cfg(unix)'.dependencies]
-daemonize = "0.5.0"
+anyhow = "1.0.97"
 
 [[bin]]
-name = "server"
+name = "leafd"

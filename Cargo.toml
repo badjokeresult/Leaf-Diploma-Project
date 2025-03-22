@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["leafcommon", "leaf-client", "server"]
+members = ["leafcommon", "leaf-client", "leafd"]
 
 [workspace.dependencies]
 tokio = { version = "1.43.0", features = ["full"] }
