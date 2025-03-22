@@ -1,5 +1,5 @@
 [package]
-name = "leaf-client"
+name = "leafclient"
 version = "0.1.0"
 edition = "2021"
 
@@ -21,4 +21,4 @@ windows-sys = { version = "0.59.0", features = [
 ] }
 
 [[bin]]
-name = "leaf-client"
+name = "leafclient"
