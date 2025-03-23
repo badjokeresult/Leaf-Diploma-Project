@@ -6,28 +6,20 @@ use rayon::prelude::*; // Внешняя зависимость для пара�
 use reed_solomon_erasure::{galois_8, ReedSolomon}; // Внешняя зависимость для создания блоков по схеме Рида-Соломона
 
 use consts::*; // Внутренний модуль с константами
-use errors::*;
-
-use crate::ByteStream; // Внутренний модуль со специфическими ошибками
+use errors::*; // Внутренний модуль с ошибками
 
 mod consts {
     // Модуль с константами
     pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
     pub const MAX_BLOCK_SIZE: usize = 65216; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
     pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
-
-    #[cfg(target_pointer_width = "64")]
-    pub const ALIGNMENT: usize = 64; // Если система 64-битная - выравнивание по 64
-
-    #[cfg(target_pointer_width = "32")]
-    pub const ALIGNMENT: usize = 32; // Если система 32-битная - выравнивание по 32
-
-    pub const MAX_AMOUNT_OF_BLOCKS: usize = 128;
+    pub const ALIGNMENT: usize = 64; // выравнивание по 64 бита
+    pub const MAX_AMOUNT_OF_BLOCKS: usize = 128; // Максимальный размер блоков для разделения за одну итерацию
 }
 
 pub trait SecretSharer<C, V> {
     // Трейт, которому должна удовлетворять структура
-    fn split_into_chunks(&self, secret: &[u8]) -> Result<(C, C), DataSplittingError>; // Метод для разбиения файлов на куски
+    fn split_into_chunks(&self, secret: &V) -> Result<(C, C), DataSplittingError>; // Метод для разбиения файлов на куски
     fn recover_from_chunks(&self, blocks: (C, C)) -> Result<V, DataRecoveringError>; // Метод восстановления файлов из блоков
 }
 
@@ -49,12 +41,12 @@ impl ReedSolomonSecretSharer {
     }
 }
 
-impl SecretSharer<ByteStream, Vec<u8>> for ReedSolomonSecretSharer {
+impl SecretSharer<Vec<Vec<u8>>, Vec<u8>> for ReedSolomonSecretSharer {
     // Реализация трейта
     fn split_into_chunks(
         &self,
-        secret: &[u8],
-    ) -> Result<(ByteStream, ByteStream), DataSplittingError> {
+        secret: &Vec<u8>,
+    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>), DataSplittingError> {
         // Метод разбиения файла на блоки
         let block_size = self.calc_block_size(secret.len()); // Получение размера блока
 
@@ -92,7 +84,7 @@ impl SecretSharer<ByteStream, Vec<u8>> for ReedSolomonSecretSharer {
 
     fn recover_from_chunks(
         &self,
-        blocks: (ByteStream, ByteStream),
+        blocks: (Vec<Vec<u8>>, Vec<Vec<u8>>),
     ) -> Result<Vec<u8>, DataRecoveringError> {
         // Метод восстановления файла из блоков
         let (mut data, mut recovery) = blocks;
@@ -116,7 +108,6 @@ impl SecretSharer<ByteStream, Vec<u8>> for ReedSolomonSecretSharer {
             let mut curr_slice = Vec::with_capacity(block_size * 2);
             let mut tmp_data = full_data[i..block_size + i].to_vec();
             let mut tmp_recv = full_data[data_len + i..block_size + i + data_len].to_vec();
-            println!("{} - {}", tmp_data.len(), tmp_recv.len());
             curr_slice.append(&mut tmp_data);
             curr_slice.append(&mut tmp_recv);
             decoder

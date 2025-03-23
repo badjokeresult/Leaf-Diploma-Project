@@ -1,26 +1,27 @@
-mod server;
+mod server; // Объявление внутренного модуля сервера
 mod socket; // Объявление внутреннего модуля сокета
 mod stor; // Объявление внутреннего модуля хранилища
 
 #[cfg(target_os = "linux")]
-mod linux;
+mod linux; // Если машина на Linux - объявляем модуль с Systemd
 
 #[cfg(target_os = "windows")]
-mod windows;
+mod windows; // Если машина на Windows - объявляем модуль с Windows Services
 
 #[cfg(target_os = "linux")]
-use server::Server;
+use server::Server; // Если машина на Linux - используем объект сервера напрямую в вызывающей функции
 
 #[cfg(target_os = "linux")]
-use linux::*;
+use linux::*; // Используем функции из Systemd-модуля
 
 #[cfg(target_os = "windows")]
-use windows::*;
+use windows::*; // Используем функции из Windows-модуля
 
 use consts::*; // Внутренний модуль с константами
 
 #[cfg(target_os = "linux")]
 mod consts {
+    // Константы для Linux компилируются для вызывающего кода
     pub const APPS_DIR_ABS_PATH: &str = "/var/local"; // Абсолютный путь к корню директории хранилища
     pub const APP_DIR: &str = "leaf"; // Директория приложения
     pub const CHUNKS_DIR: &str = "chunks"; // Директория чанков
@@ -29,15 +30,15 @@ mod consts {
 #[tokio::main]
 #[cfg(target_os = "linux")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use std::path::PathBuf;
+    use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
     use std::sync::atomic::{AtomicBool, Ordering}; // Для флага завершения
-    use std::sync::Arc; // Для разделяемого владения // Зависимость стандартной библиотеки для работы с файловыми путями
+    use std::sync::Arc; // Для разделяемого владения
 
     use tokio::select; // Для одновременного ожидания нескольких событий
-    use tokio::signal::unix::{signal, SignalKind};
-    use tokio::sync::mpsc::channel; // Внешняя зависимость для использования асинхронных каналов // Для обработки сигналов Unix
-                                    // Флаг для изящного завершения работы
-    let shutdown = Arc::new(AtomicBool::new(false));
+    use tokio::signal::unix::{signal, SignalKind}; // Для обработки сигналов Unix
+    use tokio::sync::mpsc::channel; // Внешняя зависимость для использования асинхронных каналов
+
+    let shutdown = Arc::new(AtomicBool::new(false)); // Флаг для изящного завершения работы
 
     // Настройка обработчика сигналов
     let mut sigterm = signal(SignalKind::terminate())?;
@@ -49,10 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .join(APP_DIR)
             .join(CHUNKS_DIR),
     )
-    .await?;
+    .await?; // Создаем объект сервера
 
     // Уведомляем systemd, что сервер готов к работе
-    notify_systemd_ready()?;
+    notify_systemd_ready()?; // Уведомляем systemd о готовности
 
     // Настройка watchdog
     setup_watchdog(Arc::clone(&shutdown)).await;
@@ -72,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ = socket.recv(&tx) => {
                     // Обработка полученных данных продолжается
                 }
-                _ = sigterm.recv() => {
+                _ = sigterm.recv() => { // При получении сигналов отправляем их во флаг
                     shutdown.store(true, Ordering::Relaxed);
                     break;
                 }
@@ -108,8 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 #[cfg(target_os = "windows")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use windows_service::service_dispatcher;
+    use windows_service::service_dispatcher; // Внешняя зависимость для вызова диспетчера сервисов
     if let Err(e) = service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
+        // Запуск сервиса
         return Err(e.into());
     }
 

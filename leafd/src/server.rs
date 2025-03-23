@@ -1,26 +1,28 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
+use std::sync::atomic::{AtomicBool, Ordering}; // Зависимость стандартной библиотеки для синхронизированной работы флага
+use std::sync::Arc; // Зависимость стандартной библиотеки для разделяемого доступа к объектам
 
-use tokio::fs;
-use tokio::sync::mpsc::Receiver;
-use tokio::task::JoinHandle;
+use tokio::fs; // Для асинхронной работы с файловой системой
+use tokio::sync::mpsc::Receiver; // Асинхронный получатель канала
+use tokio::task::JoinHandle; // Идентификатор асинхронного потока
 
-use leafcommon::Message;
+use leafcommon::Message; // Тип сообщения
 
-use crate::socket::{Packet, Socket};
-use crate::stor::{ServerStorage, UdpServerStorage};
+use crate::socket::{Packet, Socket}; // Внутренние определения сокета и пакета
+use crate::stor::{ServerStorage, UdpServerStorage}; // Внутренние определения хранилища
 
 use errors::*;
 
 #[derive(Clone)]
 pub struct Server {
+    // Сервер может клонироваться для корректного перемещения в поток
     socket: Socket,
     storage: UdpServerStorage,
 }
 
 impl Server {
     pub async fn new(path: PathBuf) -> Result<Server, Box<dyn std::error::Error>> {
+        // Метод конфигурации сервера
         let socket = Socket::new().await?; // Создаем объект сокета
 
         fs::create_dir_all(&path).await?; // Создаем все директории на пути, если они еще не созданы
@@ -34,16 +36,17 @@ impl Server {
         rx: Receiver<Packet>,
         shutdown_rx: Arc<AtomicBool>,
     ) -> Result<JoinHandle<()>, Box<dyn std::error::Error>> {
+        // Метод запуска сервера
         let socket = self.socket.clone();
-        let storage = self.storage.clone();
+        let storage = self.storage.clone(); // Клонируем поля для корректного перемещения в поток
         let handle = tokio::spawn(async move {
             Self::packet_handler(rx, &storage, &socket, shutdown_rx).await;
         });
-        Ok(handle)
+        Ok(handle) // Возвращаем идентификатор обработчика пакетов
     }
 
     pub fn get_socket_clone(&self) -> Socket {
-        self.socket.clone()
+        self.socket.clone() // Возвращаем глубокую копию сокета
     }
 
     async fn packet_handler(

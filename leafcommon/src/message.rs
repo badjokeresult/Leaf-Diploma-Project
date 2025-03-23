@@ -1,8 +1,8 @@
-use bincode::{deserialize, serialize};
-use serde::{Deserialize, Serialize};
-use zstd::{decode_all, encode_all}; // Внешняя зависимость для сериализации и десериализации в JSON
+use bincode::{deserialize, serialize}; // Внешняя зависимость для перевода структуры в двоичный вид
+use serde::{Deserialize, Serialize}; // Внешняя зависимость для (де)сериализации
+use zstd::{decode_all, encode_all}; // Внешняя зависимость для сжатия gzip
 
-use errors::*;
+use errors::*; // Внутренний модуль с составными ошибками
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum Message {
@@ -15,8 +15,10 @@ pub enum Message {
 
 impl Message {
     pub fn into_bytes(self) -> Result<Vec<u8>, IntoBytesCastError> {
+        // Метод перевода сообщения в двоичный формат
         encode_all(
-            serialize(&self)
+            // Сжатие
+            serialize(&self) // Сериализация в бинарный вид
                 .map_err(|e| IntoBytesCastError(e.to_string()))?
                 .as_slice(),
             3,
@@ -26,7 +28,8 @@ impl Message {
 
     pub fn from_bytes(value: Vec<u8>) -> Result<Message, FromBytesCastError> {
         deserialize::<Message>(
-            &decode_all(value.as_slice()).map_err(|e| FromBytesCastError(e.to_string()))?,
+            // Десериализация
+            &decode_all(value.as_slice()).map_err(|e| FromBytesCastError(e.to_string()))?, // Декомпрессия
         )
         .map_err(|e| FromBytesCastError(e.to_string()))
     }

@@ -1,6 +1,6 @@
 use std::path::PathBuf; // Зависимость стандартной библиотеки для использования структуры по работе с файловыми путями
 
-use tokio::fs; // Внешняя зависимость для асинхронной работы операциями ввода-вывода файловой системы
+use tokio::fs; // Внешняя зависимость для асинхронной работы c файловой системой
 
 use argon2::Argon2; // Внешняя зависимость для создания ключа из гаммы и пароля
 
@@ -16,15 +16,15 @@ use kuznyechik::{Block, Key, Kuznyechik}; // Внешние зависимост
 use streebog::digest::Update;
 use streebog::Digest; // Внешние зависимости для работы с алгоритмом вычисления хэш-сумм "Стрибог" (ГОСТ Р 34.11-2012)
 
-use consts::*;
-use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок // Внутренняя зависимость модуля констант
+use consts::*; // Внутренняя зависимость модуля констант
+use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок
 
 mod consts {
     #[cfg(target_os = "linux")]
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
     #[cfg(target_os = "windows")]
-    pub const CONFIG_ROOT: &str = "C:\\Program Files";
+    pub const CONFIG_ROOT: &str = r"C:\Program Files";
 
     #[cfg(target_os = "linux")]
     pub const CONFIG_ROOT: &str = "/etc";
@@ -32,7 +32,7 @@ mod consts {
     #[cfg(target_os = "linux")]
     pub const APP_DIR: &str = "leaf";
     #[cfg(target_os = "windows")]
-    pub const APP_DIR: &str = "Leaf\\Config";
+    pub const APP_DIR: &str = r"Leaf\Config";
 
     pub const METADATA_PATH: &str = "metadata.bin";
 }

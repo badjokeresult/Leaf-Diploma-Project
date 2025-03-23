@@ -2,8 +2,18 @@ use std::os::unix::net::UnixDatagram;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use consts::*;
+
+mod consts {
+    pub const SYSTEMD_NOTIFY_ENV_VAR: &str = "NOTIFY_SOCKET";
+    pub const SYSTEMD_NOTIFY_READY_MSG: &str = "READY=1";
+    pub const SYSTEMD_NOTIFY_STOP_MSG: &str = "STOPPING=1";
+    pub const SYSTEMD_NOTIFY_WATCHDOG_STATUS: &str = "WATCHDOG=1";
+    pub const WATCHDOG_USEC_VAR: &str = "WATCHDOG_USEC";
+}
+
 pub fn notify_systemd(state: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if let Ok(socket_path) = std::env::var("NOTIFY_SOCKET") {
+    if let Ok(socket_path) = std::env::var(SYSTEMD_NOTIFY_ENV_VAR) {
         if socket_path.is_empty() {
             return Ok(());
         }
@@ -30,23 +40,23 @@ pub fn notify_systemd(state: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 // Уведомляем systemd о готовности
 pub fn notify_systemd_ready() -> Result<(), Box<dyn std::error::Error>> {
-    notify_systemd("READY=1")
+    notify_systemd(SYSTEMD_NOTIFY_READY_MSG)
 }
 
 // Уведомляем systemd о завершении
 pub fn notify_systemd_stopping() -> Result<(), Box<dyn std::error::Error>> {
-    notify_systemd("STOPPING=1")
+    notify_systemd(SYSTEMD_NOTIFY_STOP_MSG)
 }
 
 // Отправляем сигнал watchdog
 pub fn notify_systemd_watchdog() -> Result<(), Box<dyn std::error::Error>> {
-    notify_systemd("WATCHDOG=1")
+    notify_systemd(SYSTEMD_NOTIFY_WATCHDOG_STATUS)
 }
 
 // Функция для настройки watchdog таймера
 
 pub async fn setup_watchdog(shutdown: Arc<AtomicBool>) {
-    let watchdog_usec = match std::env::var("WATCHDOG_USEC") {
+    let watchdog_usec = match std::env::var(WATCHDOG_USEC_VAR) {
         Ok(value) => match value.parse::<u64>() {
             Ok(usec) => usec,
             Err(_) => return,

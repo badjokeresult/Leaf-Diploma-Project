@@ -158,40 +158,42 @@ impl Chunk<ReedSolomonChunkHash> for ReedSolomonChunk {
                     }
                     return Err(Box::new(ReceivingChunkError(String::from(
                         "Blocks sizes mismatch",
-                    ))));
+                    )))); // Ошибка несоответствия размеров блока
                 }
             }
             return Err(Box::new(ReceivingChunkError(String::from(
                 "Hash is incorrect",
-            ))));
+            )))); // Ошибка несоответствия хэш-сумм
         }
-        Err(Box::new(ReceivingChunkError(String::from("Timeout"))))
+        Err(Box::new(ReceivingChunkError(String::from("Timeout")))) // Ошибка таймаута
     }
 }
 
 pub trait Chunks<H> {
+    // Трейт для набора чанков
     fn from_file(
         path: impl AsRef<Path>,
         sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
     ) -> impl Future<Output = Result<Self, Box<dyn Error>>>
     where
-        Self: Sized;
+        Self: Sized; // Получение чанков из файла
     fn into_file(
         self,
         path: impl AsRef<Path>,
         sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
-    ) -> impl Future<Output = Result<(), Box<dyn Error>>>;
-    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>;
-    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>;
-    fn update_hashes(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>>;
-    fn send(self) -> impl Future<Output = Result<H, Box<dyn Error>>>;
+    ) -> impl Future<Output = Result<(), Box<dyn Error>>>; // Восстановление файла
+    fn encrypt(&mut self, encryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>; // Шифрование
+    fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>>; // Дешифрование
+    fn update_hashes(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>>; // Обновление хэш-сумм
+    fn send(self) -> impl Future<Output = Result<H, Box<dyn Error>>>; // Отправка в домен
     fn recv(hashes: H) -> impl Future<Output = Result<Self, Box<dyn Error>>>
     where
-        Self: Sized;
+        Self: Sized; // Получение из домена
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ReedSolomonChunks {
+    // Чанки Рида-Соломона
     data: Vec<ReedSolomonChunk>,
     recv: Vec<ReedSolomonChunk>,
 }
@@ -201,8 +203,8 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
         path: impl AsRef<Path>,
         sharer: &Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
     ) -> Result<ReedSolomonChunks, Box<dyn Error>> {
-        let content = fs::read(path).await?;
-        let (data, recv) = sharer.split_into_chunks(&content)?;
+        let content = fs::read(path).await?; // Чтение файла
+        let (data, recv) = sharer.split_into_chunks(&content)?; // Формирование чанков
         Ok(ReedSolomonChunks {
             data: data
                 .par_iter()
@@ -235,10 +237,10 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
             .recv
             .par_iter()
             .map(|x| x.value.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>(); // Получение чанков
 
-        let content = sharer.recover_from_chunks((data, recv))?;
-        fs::write(path, content).await?;
+        let content = sharer.recover_from_chunks((data, recv))?; // Восстановление данных
+        fs::write(path, content).await?; // Запись в файл
 
         Ok(())
     }
@@ -247,21 +249,21 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
         self.data
             .iter_mut()
             .chain(self.recv.iter_mut())
-            .try_for_each(|c| c.encrypt(encryptor))
+            .try_for_each(|c| c.encrypt(encryptor)) // Шифрование
     }
 
     fn decrypt(&mut self, decryptor: &Box<dyn Encryptor<Vec<u8>>>) -> Result<(), Box<dyn Error>> {
         self.data
             .iter_mut()
             .chain(self.recv.iter_mut())
-            .try_for_each(|c| c.decrypt(decryptor))
+            .try_for_each(|c| c.decrypt(decryptor)) // Дешифрование
     }
 
     fn update_hashes(&mut self, hasher: &Box<dyn Hasher<String>>) -> Result<(), Box<dyn Error>> {
         self.data
             .iter_mut()
             .chain(self.recv.iter_mut())
-            .try_for_each(|c| c.update_hash(hasher))
+            .try_for_each(|c| c.update_hash(hasher)) // Обновление хэшей
     }
 
     async fn send(self) -> Result<ReedSolomonChunksHashes, Box<dyn Error>> {
@@ -277,15 +279,15 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
             .map_or(Err(SendingChunkError(String::from("No IP found"))), |x| {
                 Ok(x)
             })?
-            .ip();
+            .ip(); // IP-адрес машины
 
         let socket = UdpSocket::bind(CLIENT_ADDR).await?;
-        socket.set_broadcast(true)?;
+        socket.set_broadcast(true)?; // Создание сокета
 
         let data_hashes =
-            future::try_join_all(self.data.into_iter().map(|c| c.send(&socket, localaddr))).await?;
+            future::try_join_all(self.data.into_iter().map(|c| c.send(&socket, localaddr))).await?; // Отправка данных
         let recv_hashes =
-            future::try_join_all(self.recv.into_iter().map(|c| c.send(&socket, localaddr))).await?;
+            future::try_join_all(self.recv.into_iter().map(|c| c.send(&socket, localaddr))).await?; // Отправка восстановления
 
         Ok(ReedSolomonChunksHashes {
             data: data_hashes,
@@ -295,12 +297,12 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
 
     async fn recv(hashes: ReedSolomonChunksHashes) -> Result<ReedSolomonChunks, Box<dyn Error>> {
         let socket = UdpSocket::bind(CLIENT_ADDR).await?;
-        socket.set_broadcast(true)?;
+        socket.set_broadcast(true)?; // Создание сокета
         let mut data = Vec::with_capacity(hashes.len());
         let mut non_received_data_indexes = Vec::with_capacity(hashes.len());
         for i in 0..hashes.len() {
             data.push(match ReedSolomonChunk::recv(&socket, &hashes.get_data_hash(i)).await {
-                Ok(d) => d,
+                Ok(d) => d, // Получение чанка
                 Err(e) => {
                     eprintln!("Error receiving data chunk ({}), trying to receive a recovering one...", e.to_string());
                     non_received_data_indexes.push(i);
@@ -308,24 +310,25 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
                         value: vec![0u8; hashes.get_data_hash(i).get_size()],
                         hash: None,
                     }
-                },
+                }, // Запись пустого чанка и запись его индекса
             });
         }
         let mut recv = Vec::with_capacity(hashes.len());
         let mut is_all_recovery_received = true;
         for i in non_received_data_indexes {
             if !is_all_recovery_received {
+                // Если блок не получен- выходим и завершаем
                 break;
             }
             recv.push(
                 match ReedSolomonChunk::recv(&socket, &hashes.get_recv_hash(i)).await {
-                    Ok(d) => d,
+                    Ok(d) => d, // Получение данных
                     Err(_) => {
-                        is_all_recovery_received = false;
+                        is_all_recovery_received = false; // Устанавливаем флаг
                         ReedSolomonChunk {
                             value: vec![0u8; hashes.get_recv_hash(i).get_size()],
                             hash: None,
-                        }
+                        } // Запись пустого чанка
                     }
                 },
             )
@@ -340,13 +343,13 @@ impl Chunks<ReedSolomonChunksHashes> for ReedSolomonChunks {
 }
 
 pub trait ChunksHashes<H> {
-    fn save_to(self, path: impl AsRef<Path>) -> impl Future<Output = Result<(), Box<dyn Error>>>;
+    fn save_to(self, path: impl AsRef<Path>) -> impl Future<Output = Result<(), Box<dyn Error>>>; // Сохранение метаданных
     fn load_from(path: impl AsRef<Path>) -> impl Future<Output = Result<Self, Box<dyn Error>>>
     where
-        Self: Sized;
-    fn len(&self) -> usize;
-    fn get_data_hash(&self, index: usize) -> H;
-    fn get_recv_hash(&self, index: usize) -> H;
+        Self: Sized; // Чтение метаданных
+    fn len(&self) -> usize; // Количество чанков
+    fn get_data_hash(&self, index: usize) -> H; // Получение данных
+    fn get_recv_hash(&self, index: usize) -> H; // Получение восстановительных данных
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -357,37 +360,38 @@ pub struct ReedSolomonChunksHashes {
 
 impl ChunksHashes<ReedSolomonChunkHash> for ReedSolomonChunksHashes {
     async fn save_to(self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
-        let data = BASE64.encode(serde_json::to_vec(&self)?);
-        fs::write(path, &data).await?;
+        let data = BASE64.encode(serde_json::to_vec(&self)?); // Сериализация
+        fs::write(path, &data).await?; // Запись в файл
         Ok(())
     }
 
     async fn load_from(path: impl AsRef<Path>) -> Result<Self, Box<dyn Error>> {
-        let content = fs::read(path).await?;
-        let obj = serde_json::from_slice(&BASE64.decode(&content)?)?;
+        let content = fs::read(path).await?; // Чтение из файла
+        let obj = serde_json::from_slice(&BASE64.decode(&content)?)?; // Десериализация
         Ok(obj)
     }
 
     fn len(&self) -> usize {
-        self.data.len()
+        self.data.len() // Количество чанков одинаково
     }
 
     fn get_data_hash(&self, index: usize) -> ReedSolomonChunkHash {
-        self.data[index].clone()
+        self.data[index].clone() // Получение хэша по индексу
     }
 
     fn get_recv_hash(&self, index: usize) -> ReedSolomonChunkHash {
-        self.recv[index].clone()
+        self.recv[index].clone() // Получение хэша по индексу
     }
 }
 
 mod errors {
+    // Модуль с составными ошибками
     use std::error::Error;
     use std::fmt;
     use std::fmt::{Display, Formatter};
 
     #[derive(Debug, Clone)]
-    pub struct SendingChunkError(pub String);
+    pub struct SendingChunkError(pub String); // Ошибка отправки данных
 
     impl Display for SendingChunkError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -398,7 +402,7 @@ mod errors {
     impl Error for SendingChunkError {}
 
     #[derive(Debug, Clone)]
-    pub struct ReceivingChunkError(pub String);
+    pub struct ReceivingChunkError(pub String); // Ошибка получения данных
 
     impl Display for ReceivingChunkError {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

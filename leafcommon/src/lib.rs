@@ -10,5 +10,3 @@ pub use chunks::{
     Chunk, ChunkHash, Chunks, ChunksHashes, ReedSolomonChunk, ReedSolomonChunkHash,
     ReedSolomonChunks, ReedSolomonChunksHashes,
 };
-
-type ByteStream = Vec<Vec<u8>>;

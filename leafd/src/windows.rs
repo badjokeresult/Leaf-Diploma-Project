@@ -1,12 +1,12 @@
-use std::ffi::OsString;
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::Duration;
+use std::ffi::OsString; // Тип C-строк
+use std::path::PathBuf; // Тип файлового пути
+use std::sync::mpsc; // Модуль каналов
+use std::time::Duration; // Тип времени ожидания
 
-use tokio::net::UdpSocket;
-use tokio::runtime::Runtime;
+use tokio::net::UdpSocket; // Асинхронный UDP-сокет
+use tokio::runtime::Runtime; // Среда асинхронного исполнения
 
-use anyhow::Result;
+use anyhow::Result; // Корректный тип результата
 use windows_service::{
     define_windows_service,
     service::{
@@ -15,18 +15,18 @@ use windows_service::{
     },
     service_control_handler::{self, ServiceControlHandlerResult},
     service_dispatcher,
-};
+}; // Зависимости для работы со службами Windows
 
-use consts::*;
+use consts::*; // Модуль с константами
 
 mod consts {
-    pub const SERVICE_NAME: &str = "LeafServer";
-    pub const APPS_DIR_ABS_PATH: &str = "C:\\Program Files";
-    pub const APP_DIR: &str = "Leaf";
-    pub const CHUKS_DIR: &str = "Chunks";
+    pub const SERVICE_NAME: &str = "LeafServer"; // Имя будущей службы
+    pub const APPS_DIR_ABS_PATH: &str = "C:\\Program Files"; // Корень директории с приложениями
+    pub const APP_DIR: &str = "Leaf"; // Корень приложения
+    pub const CHUNKS_DIR: &str = "Chunks"; // Директория хранилища
 }
 
-define_windows_service!(ffi_service_main, service_main);
+define_windows_service!(ffi_service_main, service_main); // Определение новой службы
 
 // Главная функция службы, запускаемая диспетчером
 pub fn service_main(_arguments: Vec<OsString>) {
@@ -69,8 +69,8 @@ pub fn service_main(_arguments: Vec<OsString>) {
         return;
     }
 
-    // Запускаем UDP сервер в асинхронном режиме
     let runtime = match Runtime::new() {
+        // Создаем среду асинхронного исполнения
         Ok(rt) => rt,
         Err(e) => {
             return;
@@ -87,14 +87,14 @@ pub fn service_main(_arguments: Vec<OsString>) {
             .await
             .unwrap(),
         )
-        .unwrap();
+        .unwrap(); // В ней создается сервер
     let (tx, rx) = runtime
         .spawn(tokio::sync::mpsc::channel(100).await.unwrap())
-        .unwrap();
-    let sh_rx = Arc::new(AtomicBool);
-    let server_handle = runtime.spawn(server.run(rx, sh_rx));
-    let socket = server.get_socket_clone();
-    let socket_handle = runtime.spawn(socket.recv(&tx));
+        .unwrap(); // В ней же создаем асинхронный канал
+    let sh_rx = Arc::new(AtomicBool); // Создаем флаг завершения
+    let server_handle = runtime.spawn(server.run(rx, sh_rx)); // Запускаем сервер
+    let socket = server.get_socket_clone(); // Получаем сокет
+    let socket_handle = runtime.spawn(socket.recv(&tx)); // Отдельно запускаем получение пакетов
 
     // Ожидаем сигнала завершения
     let _ = shutdown_rx.recv();
