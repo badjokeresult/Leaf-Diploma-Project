@@ -130,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_prompt("Enter the password")
         .interact()?; // Запрашиваем пароль от СЕРВИСНОЙ УЗ в интерактивном режиме
 
-    switch_user(&password)?; // Выполняем смену пользователя на сервисную УЗ
+    //switch_user(&password)?; // Выполняем смену пользователя на сервисную УЗ
 
     // Используем тот же пароль для шифрования
     let sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>> =

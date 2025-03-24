@@ -20,6 +20,8 @@ use consts::*; // Внутренняя зависимость модуля ко�
 use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок
 
 mod consts {
+    pub const SERVICE_USER_NAME: &str = "leaf-client";
+
     #[cfg(target_os = "linux")]
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
@@ -61,11 +63,11 @@ impl KuznechikEncryptor {
     #[cfg(not(windows))]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
-        let username = whoami::username(); // Получаем имя текущего пользователя из переменной среды
+        let username = SERVICE_USER_NAME; // Получаем имя текущего пользователя из переменной среды
         match pam::Client::with_password(PAM_SERVICE_NAME) {
             // Запускаем аутентификацию при помощи PAM
             Ok(mut c) => {
-                c.conversation_mut().set_credentials(&username, password); // Отправка логина и пароля аутентификатору
+                c.conversation_mut().set_credentials(username, password); // Отправка логина и пароля аутентификатору
                 c.authenticate()
                     .map_err(|e| InitializationError(e.to_string()))?;
                 Self::initialize(password).await
@@ -84,7 +86,7 @@ impl KuznechikEncryptor {
 
         use std::ptr::null_mut;
 
-        let username = whoami::username(); // Получаем имя текущего пользователя при помощи переменной среды
+        let username = SERVICE_USER_NAME; // Получаем имя текущего пользователя при помощи переменной среды
         let mut token_handle = null_mut(); // Создаем пустой указатель для токена авторизации
 
         let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя пользователя в кодировке UTF-16
