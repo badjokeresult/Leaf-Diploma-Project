@@ -20,22 +20,22 @@ use consts::*; // Внутренняя зависимость модуля ко�
 use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок
 
 mod consts {
-    pub const SERVICE_USER_NAME: &str = "leaf-client";
-
     #[cfg(target_os = "linux")]
     pub const PAM_SERVICE_NAME: &str = "system-auth";
 
     #[cfg(target_os = "windows")]
-    pub const CONFIG_ROOT: &str = r"C:\Program Files";
+    pub const USER_VAR: &str = "USERNAME";
 
     #[cfg(target_os = "linux")]
-    pub const CONFIG_ROOT: &str = "/etc";
+    pub const USER_VAR: &str = "USER";
 
-    #[cfg(target_os = "linux")]
-    pub const APP_DIR: &str = "leaf";
     #[cfg(target_os = "windows")]
-    pub const APP_DIR: &str = r"Leaf\Config";
+    pub const HOME_DIR_VAR: &str = "USERPROFILE";
 
+    #[cfg(target_os = "linux")]
+    pub const HOME_DIR_VAR: &str = "HOME";
+
+    pub const APP_DIR: &str = ".leaf";
     pub const METADATA_PATH: &str = "metadata.bin";
 }
 
@@ -63,7 +63,7 @@ impl KuznechikEncryptor {
     #[cfg(not(windows))]
     pub async fn new(password: &str) -> Result<Self, InitializationError> {
         // Конструктор, получающий на вход строку с паролем (реализация для Linux)
-        let username = whoami::username(); // Получаем имя текущего пользователя из переменной среды
+        let username = std::env::var(USER_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя из переменной среды
         match pam::Client::with_password(PAM_SERVICE_NAME) {
             // Запускаем аутентификацию при помощи PAM
             Ok(mut c) => {
@@ -86,7 +86,7 @@ impl KuznechikEncryptor {
 
         use std::ptr::null_mut;
 
-        let username = SERVICE_USER_NAME; // Получаем имя текущего пользователя при помощи переменной среды
+        let username = std::env::var(USER_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя при помощи переменной среды
         let mut token_handle = null_mut(); // Создаем пустой указатель для токена авторизации
 
         let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя пользователя в кодировке UTF-16
@@ -164,7 +164,9 @@ impl KuznechikEncryptor {
 
     async fn get_metadata_path() -> Result<PathBuf, InitializationError> {
         // Метод получения пути файла с метаданными
-        let base_path = PathBuf::from(CONFIG_ROOT); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя
+        let base_path = PathBuf::from(
+            std::env::var(HOME_DIR_VAR).map_err(|e| InitializationError(e.to_string()))?,
+        ); // Получаем полный путь до директории с конфигурациями приложений в домашнем каталоге пользователя
 
         // Создаем директорию нашего приложения
         let app_dir = base_path.join(APP_DIR);

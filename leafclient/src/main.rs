@@ -23,16 +23,6 @@ use leafcommon::{
     StreebogHasher,
 };
 
-use consts::*; // Зависимость внутреннего модуля, содержит нужные для работы константы
-use errors::*; // Зависимость внутреннего модуля, содержит составные типы ошибок
-
-mod consts {
-    // Модуль констант
-    pub const USER_NAME: &str = "leaf-client"; // Имя сервисной УЗ, от имени которой будут выполняться все последующие действия
-    #[cfg(target_os = "linux")]
-    pub const GROUP_NAME: &str = "leaf-client"; // Имя группы сервисной УЗ, используется только в Linux
-}
-
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
@@ -66,61 +56,6 @@ pub fn load_args() -> Args {
     Args::parse()
 }
 
-#[cfg(target_os = "linux")]
-fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Функция смены эффективного пользователя в Linux
-    use nix::libc::{setgid, setuid}; // Внешние зависимости для смены GID и UID POSIX
-
-    let uid = users::get_user_by_name(USER_NAME).unwrap(); // Получаем UID по имени пользователя
-    let gid = users::get_group_by_name(GROUP_NAME).unwrap(); // Получаем GID по имени пользователя
-
-    if unsafe { setgid(gid.gid()) } != 0 && unsafe { setuid(uid.uid()) } != 0 {
-        // Сначала меняем GID, только потом UID
-        return Err(Box::new(SwitchUserError)); // Если произошла ошибка - пробрасываем ее наверх
-    }
-
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn switch_user(password: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Смена пользователя в Windows, использует механизм имперсонизации
-    use windows_sys::Win32::Foundation::{FALSE, HANDLE}; // Внешние зависимости для работы с нужными функциями WinAPI
-    use windows_sys::Win32::Security::{
-        ImpersonateLoggedOnUser, LogonUserW, RevertToSelf, LOGON32_LOGON_INTERACTIVE,
-        LOGON32_PROVIDER_DEFAULT,
-    };
-
-    let username = String::from(USER_NAME) + "\0"; // Добавляем нулевой символ в конец имени
-    let password = String::from(password) + "\0"; // Добавляем нулевой символ в конец пароля
-    let username = username.encode_utf16().collect::<Vec<u16>>(); // Кодируем имя в UTF-16
-    let password = password.encode_utf16().collect::<Vec<u16>>(); // Кодируем пароль в UTF-16
-    let mut token: HANDLE = 0; // Создаем токен авторизации
-
-    // Выполняем аутентификацию пользователя
-    let success = unsafe {
-        LogonUserW(
-            username.as_ptr(),
-            std::ptr::null(),
-            password.as_ptr(),
-            LOGON32_LOGON_INTERACTIVE,
-            LOGON32_PROVIDER_DEFAULT,
-            &mut token,
-        )
-    };
-
-    if success != FALSE {
-        // Смена пользователя механизмом имперсонизации
-        let result = ImpersonateLoggedOnUser(token);
-
-        if result != FALSE {
-            return Ok(());
-        }
-    }
-
-    Err(Box::new(SwitchUserError))
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = load_args(); // Получение аргументов командной строки
@@ -130,15 +65,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_prompt("Enter the password")
         .interact()?; // Запрашиваем пароль от СЕРВИСНОЙ УЗ в интерактивном режиме
 
-    switch_user(&password)?; // Выполняем смену пользователя на сервисную УЗ
-
     // Используем тот же пароль для шифрования
     let sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>> =
         Box::new(ReedSolomonSecretSharer::new()?); // Создаем объекты разделителя секрета, шифровальщика
     let encryptor: Box<dyn Encryptor<Vec<u8>>> =
         Box::new(KuznechikEncryptor::new(&password).await?);
-    let path = args.get_file(); // Получаем путь к файлу
 
+    let path = &args.file;
     match args.get_action() {
         Action::Send => {
             // Если файл отправляется
