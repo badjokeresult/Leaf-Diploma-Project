@@ -1,119 +1,151 @@
-mod server; // Объявление внутренного модуля сервера
 mod socket; // Объявление внутреннего модуля сокета
 mod stor; // Объявление внутреннего модуля хранилища
 
-#[cfg(target_os = "linux")]
-mod linux; // Если машина на Linux - объявляем модуль с Systemd
+use std::path::PathBuf;
 
-#[cfg(target_os = "windows")]
-mod windows; // Если машина на Windows - объявляем модуль с Windows Services
+use socket::{Packet, Socket};
+use stor::{ServerStorage, UdpServerStorage};
+use tokio::sync::mpsc::Receiver;
 
-#[cfg(target_os = "linux")]
-use server::Server; // Если машина на Linux - используем объект сервера напрямую в вызывающей функции
-
-#[cfg(target_os = "linux")]
-use linux::*; // Используем функции из Systemd-модуля
-
-#[cfg(target_os = "windows")]
-use windows::*; // Используем функции из Windows-модуля
+use leafcommon::Message;
 
 use consts::*; // Внутренний модуль с константами
+use errors::*;
 
-#[cfg(target_os = "linux")]
 mod consts {
     // Константы для Linux компилируются для вызывающего кода
+    #[cfg(target_os = "linux")]
     pub const APPS_DIR_ABS_PATH: &str = "/var/local"; // Абсолютный путь к корню директории хранилища
+    #[cfg(target_os = "linux")]
     pub const APP_DIR: &str = "leaf"; // Директория приложения
+    #[cfg(target_os = "linux")]
     pub const CHUNKS_DIR: &str = "chunks"; // Директория чанков
+
+    #[cfg(target_os = "windows")]
+    pub const APPS_DIR_ABS_PATH: &str = "C:\\Program Files"; // Корень директории с приложениями
+    #[cfg(target_os = "windows")]
+    pub const APP_DIR: &str = "Leaf"; // Корень приложения
+    #[cfg(target_os = "windows")]
+    pub const CHUNKS_DIR: &str = "Chunks"; // Директория хранилища
 }
 
 #[tokio::main]
-#[cfg(target_os = "linux")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
-    use std::sync::atomic::{AtomicBool, Ordering}; // Для флага завершения
-    use std::sync::Arc; // Для разделяемого владения
+    let socket = Socket::new().await?; // Создаем объект сокета
 
-    use tokio::select; // Для одновременного ожидания нескольких событий
-    use tokio::signal::unix::{signal, SignalKind}; // Для обработки сигналов Unix
-    use tokio::sync::mpsc::channel; // Внешняя зависимость для использования асинхронных каналов
-
-    let shutdown = Arc::new(AtomicBool::new(false)); // Флаг для изящного завершения работы
-
-    // Настройка обработчика сигналов
-    let mut sigterm = signal(SignalKind::terminate())?;
-    let mut sigint = signal(SignalKind::interrupt())?;
-    let mut sighup = signal(SignalKind::hangup())?;
-
-    let server = Server::new(
-        PathBuf::from(APPS_DIR_ABS_PATH)
-            .join(APP_DIR)
-            .join(CHUNKS_DIR),
-    )
-    .await?; // Создаем объект сервера
-
-    // Уведомляем systemd, что сервер готов к работе
-    notify_systemd_ready()?; // Уведомляем systemd о готовности
-
-    // Настройка watchdog
-    setup_watchdog(Arc::clone(&shutdown)).await;
-
-    // Клонирование сокета и флага для использования в асинхронном потоке
-    let shutdown_clone = Arc::clone(&shutdown);
-    let (tx, rx) = channel(100);
-
-    // Запуск обработчика пакетов
-    let handler = server.run(rx, shutdown_clone)?;
-    let socket = server.get_socket_clone();
-
-    // Основной цикл, который также проверяет сигналы для корректного завершения
-    let receiver_task = tokio::spawn(async move {
-        while !shutdown.load(Ordering::Relaxed) {
-            select! {
-                _ = socket.recv(&tx) => {
-                    // Обработка полученных данных продолжается
-                }
-                _ = sigterm.recv() => { // При получении сигналов отправляем их во флаг
-                    shutdown.store(true, Ordering::Relaxed);
-                    break;
-                }
-                _ = sigint.recv() => {
-                    shutdown.store(true, Ordering::Relaxed);
-                    break;
-                }
-                _ = sighup.recv() => {
-                    // Здесь могла бы быть логика перезагрузки конфигурации
-                }
-            }
-        }
+    let path = PathBuf::from(APPS_DIR_ABS_PATH)
+        .join(APP_DIR)
+        .join(CHUNKS_DIR);
+    let storage = UdpServerStorage::new(path);
+    let socket_clone = socket.clone();
+    let storage_clone = storage.clone(); // Клонируем поля для корректного перемещения в поток
+    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    tokio::spawn(async move {
+        packet_handler(rx, &storage_clone, &socket_clone).await;
     });
 
-    // Ожидаем завершения любой из задач
-    select! {
-        _ = handler => {
-            println!("Packet handler finished");
-        }
-        _ = receiver_task => {
-            println!("Receiver task finished");
-        }
+    loop {
+        socket.recv(&tx).await;
     }
-
-    // Уведомляем systemd о завершении работы
-    if let Err(e) = notify_systemd_stopping() {
-        eprintln!("Failed to notify systemd about stopping: {}", e);
-    }
-
-    Ok(())
 }
 
-#[tokio::main]
-#[cfg(target_os = "windows")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use windows_service::service_dispatcher; // Внешняя зависимость для вызова диспетчера сервисов
-    if let Err(e) = service_dispatcher::start(SERVICE_NAME, ffi_service_main) {
-        // Запуск сервиса
-        return Err(e.into());
+async fn packet_handler(mut rx: Receiver<Packet>, storage: &UdpServerStorage, socket: &Socket) {
+    // Функция-обработчик сообщений
+    while let Some(p) = rx.recv().await {
+        // Ожидание новых данных из канала в сокете
+        if let Err(e) = process_packet(p, storage, socket).await {
+            // Обрабатываем пакет и проверяем наличие ошибок
+            eprintln!("{}", e.to_string()); // При наличии ошибок пишем их в stderr, но не прерываем поток
+        };
+    }
+}
+
+async fn process_packet(
+    // Функция обработки отдельного пакета
+    packet: Packet,
+    storage: &UdpServerStorage,
+    socket: &Socket,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (data, addr) = packet.deconstruct(); // Разбираем пакет на данные и адрес источника
+    let message = Message::from_bytes(data)?; // Восстанавливаем сообщение из потока байт
+    match message.clone() {
+        Message::SendingReq(h) => {
+            // Если сообщение является запросом на хранение
+            if storage.can_save().await? {
+                // Проверка доступного места на диске
+                let ack = Message::SendingAck(h).into_bytes()?; // Создание сообщения подтверждения хранения и перевод его в поток байт
+                let packet = Packet::new(ack, addr); // Сбор нового пакета
+                socket.send(packet).await?; // Отправка пакета сокету
+                return Ok(()); // Возврат
+            }
+            Err(Box::new(NoFreeSpaceError)) // Если места нет - возвращаем соответствующую ошибку
+        }
+        Message::RetrievingReq(h) => {
+            // Если сообщение является запросом на получение
+            if let Ok(d) = storage.get(&h).await {
+                // Если в хранилище есть такой хэш
+                let message = Message::ContentFilled(h.clone(), d).into_bytes()?; // Создание сообщения с данными и перевод его в поток байт
+                let packet = Packet::new(message, addr); // Сбор нового пакета
+                socket.send(packet).await?; // Отправка пакета в сокет
+                return Ok(()); // Возврат
+            }
+            Err(Box::new(NoHashError(h))) // Если в хранилище нет такого хэша - возвращаем соответствующую ошибку
+        }
+        Message::ContentFilled(h, d) => {
+            // Если сообщение содержит данные
+            storage.save(&h, &d).await?; // Сохраняем данные на диске
+            Ok(()) // Возврат
+        }
+        _ => Err(Box::new(InvalidMessageError)), // Если пришли любые другие данные - возвращаем ошибку
+    }
+}
+
+mod errors {
+    // Модуль с составными типами ошибок
+    use std::error::Error; // Зависимость стандартной библиотеки для работы с трейтом ошибок
+    use std::fmt; // Зависимость стандартной библиотеки для работы с форматированием
+
+    #[derive(Debug, Clone)]
+    pub struct NoFreeSpaceError; // Тип ошибки отсутствия свободного места на диске
+
+    impl fmt::Display for NoFreeSpaceError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "No free space left for keeping data")
+        }
     }
 
-    Ok(())
+    impl Error for NoFreeSpaceError {}
+
+    #[derive(Debug, Clone)]
+    pub struct NoHashError(pub String); // Тип ошибки отсутствия представленного хэша в хранилище
+
+    impl fmt::Display for NoHashError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "No hash {} was found", self.0)
+        }
+    }
+
+    impl Error for NoHashError {}
+
+    #[derive(Debug, Clone)]
+    pub struct InvalidMessageError; // Тип ошибки нераспознанного сообщения
+
+    impl fmt::Display for InvalidMessageError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Got invalid message")
+        }
+    }
+
+    impl Error for InvalidMessageError {}
+
+    #[derive(Debug, Clone)]
+    pub struct ServerInitError(pub String); // Тип ошибки инициализации сервера
+
+    impl fmt::Display for ServerInitError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Error starting server: {}", self.0)
+        }
+    }
+
+    impl Error for ServerInitError {}
 }

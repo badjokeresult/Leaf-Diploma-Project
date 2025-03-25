@@ -11,9 +11,5 @@ walkdir = "2.5.0"
 clap = { workspace = true }
 clap_derive = { workspace = true }
 
-[target.'cfg(windows)'.dependencies]
-windows-service = "0.8.0"
-anyhow = "1.0.97"
-
 [[bin]]
 name = "leafd"
