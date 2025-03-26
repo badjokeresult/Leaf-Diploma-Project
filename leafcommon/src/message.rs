@@ -1,4 +1,4 @@
-use bincode::{deserialize, serialize}; // Внешняя зависимость для перевода структуры в двоичный вид
+use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize}; // Внешняя зависимость для (де)сериализации
 use zstd::{decode_all, encode_all}; // Внешняя зависимость для сжатия gzip
 

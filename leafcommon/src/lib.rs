@@ -1,9 +1,8 @@
 pub mod crypto;
-pub use crypto::{Encryptor, Hasher, KuznechikEncryptor, StreebogHasher};
+pub use crypto::{Encryptor, KuznechikEncryptor};
 pub mod message;
 pub use message::Message;
-pub mod shards;
-pub use shards::{ReedSolomonSecretSharer, SecretSharer};
+mod shards;
 
 pub mod chunks;
 pub use chunks::{

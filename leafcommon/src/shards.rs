@@ -1,37 +1,22 @@
-#![allow(dead_code)]
+pub mod reed_solomon {
+    use std::cmp::{max, min};
 
-use std::cmp::{max, min}; // Зависимость стандартной библиотеки для вычисления размера блока
+    use rayon::prelude::*;
+    use reed_solomon_erasure::{galois_8, ReedSolomon}; // Внешняя зависимость для создания блоков по схеме Рида-Соломона
 
-use rayon::prelude::*; // Внешняя зависимость для параллельной обработки блоков
-use reed_solomon_erasure::{galois_8, ReedSolomon}; // Внешняя зависимость для создания блоков по схеме Рида-Соломона
+    use super::errors::*;
+    use consts::*;
 
-use consts::*; // Внутренний модуль с константами
-use errors::*; // Внутренний модуль с ошибками
-
-mod consts {
-    // Модуль с константами
-    pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
-    pub const MAX_BLOCK_SIZE: usize = 65216; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
-    pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
-    pub const ALIGNMENT: usize = 64; // выравнивание по 64 бита
-    pub const MAX_AMOUNT_OF_BLOCKS: usize = 128; // Максимальный размер блоков для разделения за одну итерацию
-}
-
-pub trait SecretSharer<C, V> {
-    // Трейт, которому должна удовлетворять структура
-    fn split_into_chunks(&self, secret: &V) -> Result<(C, C), DataSplittingError>; // Метод для разбиения файлов на куски
-    fn recover_from_chunks(&self, blocks: (C, C)) -> Result<V, DataRecoveringError>; // Метод восстановления файлов из блоков
-}
-
-pub struct ReedSolomonSecretSharer; // Структура схемы Рида-Соломона
-
-impl ReedSolomonSecretSharer {
-    pub fn new() -> Result<ReedSolomonSecretSharer, InitializationError> {
-        // Конструктор структуры схемы Рида-Соломона
-        Ok(ReedSolomonSecretSharer {})
+    mod consts {
+        // Модуль с константами
+        pub const MIN_BLOCK_SIZE: usize = 64; // Минимальный размер блока - 64 байта
+        pub const MAX_BLOCK_SIZE: usize = 65216; // Максимальный размер блока - 65251 байта, т.к. максимальный размер нагрузки UDP пакета - 65535 байт, из которых вычитаем 256 байт хэша и 8 байт заголовков
+        pub const GROWTH_FACTOR: f64 = 0.5_f64; // Коэффициент роста - 0.5
+        pub const ALIGNMENT: usize = 64; // выравнивание по 64 бита
+        pub const MAX_AMOUNT_OF_BLOCKS: usize = 128; // Максимальный размер блоков для разделения за одну итерацию
     }
 
-    fn calc_block_size(&self, file_size: usize) -> usize {
+    fn calc_block_size(file_size: usize) -> usize {
         // Метод рассчета размера блока
         let bs = MIN_BLOCK_SIZE as f64
             * ((file_size as f64 / MIN_BLOCK_SIZE as f64).powf(GROWTH_FACTOR));
@@ -39,16 +24,12 @@ impl ReedSolomonSecretSharer {
         let bs = ((bs + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
         bs
     }
-}
 
-impl SecretSharer<Vec<Vec<u8>>, Vec<u8>> for ReedSolomonSecretSharer {
-    // Реализация трейта
-    fn split_into_chunks(
-        &self,
-        secret: &Vec<u8>,
-    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>), DataSplittingError> {
+    pub fn split(
+        secret: Vec<u8>,
+    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>), Box<dyn std::error::Error>> {
         // Метод разбиения файла на блоки
-        let block_size = self.calc_block_size(secret.len()); // Получение размера блока
+        let block_size = calc_block_size(secret.len()); // Получение размера блока
 
         let mut blocks = secret
             .par_iter()
@@ -82,16 +63,15 @@ impl SecretSharer<Vec<Vec<u8>>, Vec<u8>> for ReedSolomonSecretSharer {
         Ok((blocks, parity)) // Возврат структуры с блоками
     }
 
-    fn recover_from_chunks(
-        &self,
-        blocks: (Vec<Vec<u8>>, Vec<Vec<u8>>),
-    ) -> Result<Vec<u8>, DataRecoveringError> {
+    pub fn recover(
+        mut data: Vec<Vec<u8>>,
+        mut recv: Vec<Vec<u8>>,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Метод восстановления файла из блоков
-        let (mut data, mut recovery) = blocks;
         let data_len = data.len();
 
         // Объединяем data и recovery в один массив для восстановления
-        data.append(&mut recovery);
+        data.append(&mut recv);
         let full_data = data.par_iter().cloned().map(Some).collect::<Vec<_>>();
 
         let mut result = Vec::with_capacity(data_len);
@@ -126,10 +106,15 @@ impl SecretSharer<Vec<Vec<u8>>, Vec<u8>> for ReedSolomonSecretSharer {
             .flatten()
             .collect::<Vec<_>>();
         // Удаление нулей в конце последовательности
-        let content = match content.iter().position(|x| 0u8.eq(x)) {
-            Some(p) => content.split_at(p).0.to_vec(),
-            None => content,
-        };
+        let mut zeros_start_index: Option<isize> = None;
+        for i in content.len() - 1..0 {
+            if content[i] != 0 {
+                zeros_start_index = Some((i + 1) as isize);
+                break;
+            }
+        }
+        let content_len = zeros_start_index.map_or(content.len(), |x| x as usize);
+        let content = content[0..content_len].to_vec();
         Ok(content)
     }
 }

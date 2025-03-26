@@ -1,34 +1,17 @@
 use std::path::PathBuf; // Зависимость стандартной библиотеки для использования структуры по работе с файловыми путями
 
-use tokio::fs; // Внешняя зависимость для асинхронной работы c файловой системой
-
-use argon2::Argon2; // Внешняя зависимость для создания ключа из гаммы и пароля
-
-use rand::{rngs::OsRng, Rng}; // Внешняя зависимость для генерации псевдослучайных последовательностей
-
+use argon2::Argon2; // Внешняя зависимость для создания ключа из гаммы, соли и пароля
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _}; // Внешняя зависимость для кодирования и декодирования по алгоритму Base64
-
-use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации структур
-
 use kuznyechik::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
-use kuznyechik::{Block, Key, Kuznyechik}; // Внешние зависимости для работы с симметричным шифром "Кузнечик (ГОСТ Р 34.12-2015)"
-
-use streebog::digest::Update;
-use streebog::Digest; // Внешние зависимости для работы с алгоритмом вычисления хэш-сумм "Стрибог" (ГОСТ Р 34.11-2012)
+use kuznyechik::{Block, Key, Kuznyechik};
+use rand::{rngs::OsRng, Rng}; // Внешняя зависимость для генерации псевдослучайных последовательностей
+use serde::{Deserialize, Serialize}; // Внешняя зависимость для сериализации и десериализации структур
+use tokio::fs; // Внешняя зависимость для асинхронной работы c файловой системой // Внешние зависимости для работы с симметричным шифром "Кузнечик (ГОСТ Р 34.12-2015)"
 
 use consts::*; // Внутренняя зависимость модуля констант
 use errors::*; // Внутренняя зависимость модуля для использования собственных типов ошибок
 
 mod consts {
-    #[cfg(target_os = "linux")]
-    pub const PAM_SERVICE_NAME: &str = "system-auth";
-
-    #[cfg(target_os = "windows")]
-    pub const USER_VAR: &str = "USERNAME";
-
-    #[cfg(target_os = "linux")]
-    pub const USER_VAR: &str = "USER";
-
     #[cfg(target_os = "windows")]
     pub const HOME_DIR_VAR: &str = "USERPROFILE";
 
@@ -44,12 +27,13 @@ struct EncryptionMetadata {
     // Структура для хранения гаммы и соли для использования в шифровании "Кузнечиком"
     gamma: Vec<u8>, // Закодированная по Base64 гамма
     salt: Vec<u8>,  // Закодированная по Base64 соль
+    token: Vec<u8>, // Закодированный по Base64 токен
 }
 
-pub trait Encryptor<V> {
+pub trait Encryptor {
     // Трейт для структур, реализующих шифрование
-    fn encrypt_chunk(&self, chunk: &[u8]) -> V; // Прототип метода шифрования массива данных
-    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<V, DecryptionError>; // Прототип метода дешифрования массива данных
+    fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8>; // Прототип метода шифрования массива данных
+    fn decrypt_chunk(&self, chunk: &[u8]) -> Result<Vec<u8>, DecryptionError>; // Прототип метода дешифрования массива данных
 }
 
 pub struct KuznechikEncryptor {
@@ -60,66 +44,11 @@ pub struct KuznechikEncryptor {
 }
 
 impl KuznechikEncryptor {
-    #[cfg(not(windows))]
-    pub async fn new(password: &str) -> Result<Self, InitializationError> {
-        // Конструктор, получающий на вход строку с паролем (реализация для Linux)
-        let username = std::env::var(USER_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя из переменной среды
-        match pam::Client::with_password(PAM_SERVICE_NAME) {
-            // Запускаем аутентификацию при помощи PAM
-            Ok(mut c) => {
-                c.conversation_mut().set_credentials(username, password); // Отправка логина и пароля аутентификатору
-                c.authenticate()
-                    .map_err(|e| InitializationError(e.to_string()))?;
-                Self::initialize(password).await
-            }
-            Err(e) => Err(InitializationError(e.to_string())), // В случае ошибки запуска аутентификации возвращаем ошибку
-        }
-    }
-
-    #[cfg(windows)]
-    pub async fn new(password: &str) -> Result<Self, InitializationError> {
-        // Конструктор, получающая на вход строку с паролем (реализация для Windows)
-        // Загружаем необходимые зависимости
-        use windows_sys::Win32::Security::LogonUserW;
-        use windows_sys::Win32::Security::LOGON32_LOGON_INTERACTIVE;
-        use windows_sys::Win32::Security::LOGON32_PROVIDER_DEFAULT;
-
-        use std::ptr::null_mut;
-
-        let username = std::env::var(USER_VAR).map_err(|e| InitializationError(e.to_string()))?; // Получаем имя текущего пользователя при помощи переменной среды
-        let mut token_handle = null_mut(); // Создаем пустой указатель для токена авторизации
-
-        let username_wide: Vec<u16> = username.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя пользователя в кодировке UTF-16
-        let password_wide: Vec<u16> = password.encode_utf16().chain(std::iter::once(0)).collect(); // Получаем пароль в кодировке UTF-16
-        let domain_wide: Vec<u16> = ".".encode_utf16().chain(std::iter::once(0)).collect(); // Получаем имя домена в кодировке UTF-16
-
-        // Выполняем проверку правильности введенных данных
-        if unsafe {
-            LogonUserW(
-                username_wide.as_ptr(),
-                domain_wide.as_ptr(),
-                password_wide.as_ptr(),
-                LOGON32_LOGON_INTERACTIVE,
-                LOGON32_PROVIDER_DEFAULT,
-                &mut token_handle,
-            )
-        } == 0
-        {
-            return Err(InitializationError(String::from("Invalid password"))); // Если данные неверны - возвращаем ошибку
-        }
-
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(token_handle) // Удаляем указатель на токен авторизации
-        };
-
-        Self::initialize(password).await // Запускаем метод инициализации ключа и гаммы
-    }
-
-    async fn initialize(password: &str) -> Result<Self, InitializationError> {
+    pub async fn new() -> Result<Self, InitializationError> {
         // Метод инициализации полей структуры гаммой и ключом
         let metadata_path = Self::get_metadata_path().await?; // Получаем путь до файла с метаданными при помощи метода
 
-        let (gamma, salt) = if metadata_path.exists() {
+        let (gamma, salt, token) = if metadata_path.exists() {
             // Если файл с метаданными существует, то читаем данные из него и идем дальше
             let metadata: EncryptionMetadata = Self::load_metadata(&metadata_path).await?;
             (
@@ -129,27 +58,33 @@ impl KuznechikEncryptor {
                 BASE64
                     .decode(&metadata.salt)
                     .map_err(|e| InitializationError(e.to_string()))?,
+                BASE64
+                    .decode(&metadata.token)
+                    .map_err(|e| InitializationError(e.to_string()))?,
             )
         } else {
             // Если такого файла нет, то создаем новые гамму и соль
             let mut gamma = vec![0u8; 16]; // Создаем 128-битный буфер для гаммы
             let mut salt = vec![0u8; 32]; // Создаем 256-битный буфер для соли
+            let mut token = vec![0u8; 32]; // Создаем 256-битный буфер для токена
             OsRng.fill(&mut gamma[..]); // Заполняем буфер гаммы случайными данными
             OsRng.fill(&mut salt[..]); // Заполняем буфер соли случайными данными
+            OsRng.fill(&mut token[..]);
 
             let metadata = EncryptionMetadata {
                 gamma: BASE64.encode(&gamma).into_bytes(),
                 salt: BASE64.encode(&salt).into_bytes(),
+                token: BASE64.encode(&token).into_bytes(),
             }; // Создаем новый экземпляр структуры и заполняем его поля соответствующими буферами
             Self::save_metadata(&metadata_path, &metadata).await?; // Сохраняем метаданные в файл
 
-            (gamma, salt)
+            (gamma, salt, token)
         };
 
         let config = Argon2::default(); // Создание конфигурации для создания ключа шифрования
         let mut key = vec![0u8; 32]; // Создаем буфер для ключа
         config
-            .hash_password_into(password.as_bytes(), &salt, &mut key)
+            .hash_password_into(&token, &salt, &mut key)
             .map_err(|e| InitializationError(e.to_string()))?; // Создаем ключ и записываем его в буфер
 
         let cipher_key = Key::from_slice(&key); // Создаем объект ключа шифрования из буфера
@@ -200,9 +135,11 @@ impl KuznechikEncryptor {
         .map_err(|e| InitializationError(e.to_string()))?) // Записываем текст в файл
     }
 
-    pub async fn regenerate_gamma(&mut self) -> Result<(), GammaRegenerationError> {
+    pub async fn regenerate_gamma_and_token(&mut self) -> Result<(), GammaRegenerationError> {
         // Метод регенерации гаммы
+        let mut token = vec![0u8; 32];
         OsRng.fill(&mut self.gamma[..]); // Гамма заполняется новыми случайными данными
+        OsRng.fill(&mut token[..]);
 
         let metadata = EncryptionMetadata {
             gamma: BASE64.encode(&self.gamma).into_bytes(),
@@ -214,6 +151,7 @@ impl KuznechikEncryptor {
                         .salt,
                 )
                 .map_err(|e| GammaRegenerationError(e.to_string()))?, // Создается новый экземпляр структуры метаданных, все поля предварительно кодируются в Base64
+            token: BASE64.encode(&token).into_bytes(),
         };
         Self::save_metadata(&self.metadata_path, &metadata)
             .await
@@ -221,7 +159,7 @@ impl KuznechikEncryptor {
     }
 }
 
-impl Encryptor<Vec<u8>> for KuznechikEncryptor {
+impl Encryptor for KuznechikEncryptor {
     // Блок реализации трейта для структуры
     fn encrypt_chunk(&self, chunk: &[u8]) -> Vec<u8> {
         // Метод шифрования данных на месте
@@ -280,30 +218,18 @@ impl Encryptor<Vec<u8>> for KuznechikEncryptor {
     }
 }
 
-pub trait Hasher<V> {
-    // Трейт для структур, реализующий вычисление хэш-суммы
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> V; // Метод вычисления хэш-суммы
-}
+pub mod hash {
+    pub mod streebog {
+        use streebog::digest::Update;
+        use streebog::Digest;
 
-#[derive(Clone)]
-pub struct StreebogHasher; // Структура для вычисления хэш-суммы
-
-impl StreebogHasher {
-    pub fn new() -> StreebogHasher {
-        // Конструктор
-        StreebogHasher {}
-    }
-}
-
-impl Hasher<String> for StreebogHasher {
-    // Реализация трейта
-    fn calc_hash_for_chunk(&self, chunk: &[u8]) -> String {
-        // Метод вычисления хэш-суммы
-        let mut hasher = streebog::Streebog256::new(); // Создаем новый объект хэшера
-        Update::update(&mut hasher, chunk); // Передаем хэшеру данные для вычисления
-        let hash = hasher.clone().finalize(); // Вычисляем хэш-сумму для отданных данных
-        let hash = hash.to_vec(); // Переводим в тип вектора
-        hex::encode(hash) // Перевод вектора в шестнадцатеричную строку
+        pub fn calc_hash(chunk: &[u8]) -> String {
+            let mut hasher = streebog::Streebog256::new(); // Создаем новый объект хэшера
+            Update::update(&mut hasher, chunk); // Передаем хэшеру данные для вычисления
+            let hash = hasher.clone().finalize(); // Вычисляем хэш-сумму для отданных данных
+            let hash = hash.to_vec(); // Переводим в тип вектора
+            hex::encode(hash)
+        }
     }
 }
 

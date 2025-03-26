@@ -6,21 +6,14 @@ use clap::Parser; // Внешние зависимости для работы �
 use clap::{arg, command};
 use clap_derive::{Parser, ValueEnum};
 
-use dialoguer::theme::ColorfulTheme; // Внешние зависимости для работы с безопасным пользовательским вводом в терминале
-use dialoguer::Password;
-
 use leafcommon::{
     // Зависимости внутренней библиотеки проекта
     Chunks,
     ChunksHashes,
     Encryptor,
-    Hasher,
     KuznechikEncryptor,
     ReedSolomonChunks,
     ReedSolomonChunksHashes,
-    ReedSolomonSecretSharer,
-    SecretSharer,
-    StreebogHasher,
 };
 
 #[derive(Parser, Debug)]
@@ -60,38 +53,24 @@ pub fn load_args() -> Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = load_args(); // Получение аргументов командной строки
 
-    // Запрашиваем пароль у пользователя
-    let password = Password::with_theme(&ColorfulTheme::default())
-        .with_prompt("Enter the password")
-        .interact()?; // Запрашиваем пароль от СЕРВИСНОЙ УЗ в интерактивном режиме
-
-    // Используем тот же пароль для шифрования
-    let sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>> =
-        Box::new(ReedSolomonSecretSharer::new()?); // Создаем объекты разделителя секрета, шифровальщика
-    let encryptor: Box<dyn Encryptor<Vec<u8>>> =
-        Box::new(KuznechikEncryptor::new(&password).await?);
+    // Используем тот же пароль для шифрования шифровальщика
+    let encryptor: Box<dyn Encryptor> = Box::new(KuznechikEncryptor::new().await?);
 
     let path = &args.file;
     match args.get_action() {
-        Action::Send => {
-            // Если файл отправляется
-            let hasher: Box<dyn Hasher<String>> = Box::new(StreebogHasher::new()); // Дополнительно создаем объект хэш-вычислителя
-            send_file(path, sharer, encryptor, hasher).await // Отправляем файл
-        }
-        Action::Receive => recv_file(path, sharer, encryptor).await, // Если получение - вызываем функцию получения
+        Action::Send => send_file(path, encryptor).await,
+        Action::Receive => recv_file(path, encryptor).await, // Если получение - вызываем функцию получения
     }
 }
 
 async fn send_file(
     path: impl AsRef<Path>,
-    sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
-    encryptor: Box<dyn Encryptor<Vec<u8>>>,
-    hasher: Box<dyn Hasher<String>>,
+    encryptor: Box<dyn Encryptor>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Функция отправки файла
-    let mut chunks = ReedSolomonChunks::from_file(&path, &sharer).await?; // Получаем чанки
+    let mut chunks = ReedSolomonChunks::from_file(&path).await?; // Получаем чанки
     chunks.encrypt(&encryptor)?; // Шифруем их
-    chunks.update_hashes(&hasher)?; // Обновляем их хэш-суммы
+    chunks.update_hashes()?; // Обновляем их хэш-суммы
     let hashes = chunks.send().await?; // Отправляем чанки в домен и получаем назад их хэш-суммы
     hashes.save_to(path).await?; // Сохраняем хэш-суммы в целевом файле
     Ok(())
@@ -99,14 +78,13 @@ async fn send_file(
 
 async fn recv_file(
     path: impl AsRef<Path>,
-    sharer: Box<dyn SecretSharer<Vec<Vec<u8>>, Vec<u8>>>,
-    encryptor: Box<dyn Encryptor<Vec<u8>>>,
+    encryptor: Box<dyn Encryptor>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Функция получения файла
     let hashes = ReedSolomonChunksHashes::load_from(&path).await?; // Получаем хэш-суммы из файла
     let mut chunks = ReedSolomonChunks::recv(hashes).await?; // Получаем чанки по хэшам
     chunks.decrypt(&encryptor)?; // Расшифровываем чанки
-    chunks.into_file(path, &sharer).await?; // Восстанавливаем из них содержимое и записываем его в целевой файл
+    chunks.into_file(path).await?; // Восстанавливаем из них содержимое и записываем его в целевой файл
     Ok(())
 }
 
