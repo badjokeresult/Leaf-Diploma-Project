@@ -1,10 +1,9 @@
-use std::path::PathBuf; // Зависимость стандартной библиотеки для работы с файловыми путями
+use std::{collections::HashMap, path::PathBuf}; // Зависимость стандартной библиотеки для работы с файловыми путями
 
-use tokio::{fs, task}; // Внешняя зависимость для работы с файловыми операциями асинхронно
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use serde::{Deserialize, Serialize};
+use tokio::fs; // Внешняя зависимость для работы с файловыми операциями асинхронно
 use uuid::Uuid; // Внешняя зависимость для генерации UUID
-use walkdir::WalkDir; // Внешняя зависимость для рекурсивного обхода директорий
-
-use leafcommon::{Hasher, StreebogHasher}; // Зависимость внутренней библиотеки для вычисления хэш-сумм
 
 use consts::*; // Внутренний модуль с константами
 use errors::*; // Внутренний модуль с составными типами ошибок
@@ -16,114 +15,109 @@ mod consts {
 
 pub trait ServerStorage {
     // Трейт серверного хранилища
-    async fn save(&self, hash: &str, data: &[u8]) -> Result<(), SavingDataError>; // Шаблон метода сохранения данных
-    async fn get(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError>; // Шаблон метода получения данных
-    async fn can_save(&self) -> Result<bool, SavingDataError>; // Шаблон метода проверки возможности сохранения
+    async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>>; // Шаблон метода сохранения данных
+    async fn get(&mut self, hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>>; // Шаблон метода получения данных
+    fn can_save(&self) -> bool; // Шаблон метода проверки возможности сохранения
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct UdpServerStorageState {
+    pub hashes: HashMap<String, PathBuf>,
+    pub size: usize,
 }
 
 #[derive(Clone)]
 pub struct UdpServerStorage {
     // Структура серверного хранилища
-    hasher: StreebogHasher, // Поле с вычислителем хэша
-    path: PathBuf,          // Поле со значением пути хранилища
+    path: PathBuf, // Поле со значением пути хранилища
+    state: UdpServerStorageState,
+}
+
+impl UdpServerStorageState {
+    pub async fn new(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        if path.exists() {
+            let content = fs::read(path).await?;
+            let obj = serde_json::from_slice(&BASE64.decode(&content)?)?;
+            return Ok(obj);
+        }
+        Ok(UdpServerStorageState {
+            hashes: HashMap::new(),
+            size: 0,
+        })
+    }
+
+    pub async fn shutdown(self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        fs::write(path, BASE64.encode(&serde_json::to_vec(&self)?).as_bytes()).await?;
+        Ok(())
+    }
 }
 
 impl UdpServerStorage {
     // Реализация структуры
-    pub fn new(path: PathBuf) -> UdpServerStorage {
+    pub async fn new(
+        storage_path: PathBuf,
+        state_path: PathBuf,
+    ) -> Result<UdpServerStorage, Box<dyn std::error::Error>> {
         // Конструктор
-        UdpServerStorage {
-            hasher: StreebogHasher::new(),
-            path,
-        }
-    }
-
-    async fn get_occupied_space(&self) -> Result<usize, RetrievingDataError> {
-        // Метод расчета текущего занятого хранилищем места на диске
-        let path = self.path.clone();
-
-        let size = task::spawn_blocking(move || {
-            // Запускаем блокирующую асинхронную задачу для прохода по директории
-            let mut total_size = 0; // Счетчик занятого места в байтах
-            for entry in WalkDir::new(&path) {
-                let entry = entry.map_err(|e| RetrievingDataError(e.to_string()))?; // Пытаемся получить объект в директории
-                if entry.path().is_file() {
-                    // Проверяем, что объект является файлом
-                    if let Ok(meta) = std::fs::metadata(entry.path()) {
-                        // Пытаемся получить сведения о файле
-                        total_size += meta.len() as usize; // Добавляем размер файла к общему счетчику
-                    }
-                }
-            }
-            Ok(total_size) // Возвращаем счетчик
+        Ok(UdpServerStorage {
+            path: storage_path,
+            state: UdpServerStorageState::new(&state_path).await?,
         })
-        .await
-        .map_err(|e| RetrievingDataError(e.to_string()))??;
-
-        Ok(size) // Возвращаем размер директории
     }
 
-    async fn search_for_hash(&self, hash: &str) -> Result<(PathBuf, Vec<u8>), RetrievingDataError> {
+    fn get_occupied_space(&self) -> usize {
+        // Метод расчета текущего занятого хранилищем места на диске
+        self.state.size
+    }
+
+    fn is_hash_presented(&self, hash: &str) -> bool {
         // Метод вычисления хэш-сумм всех файлов в директории
-        for entry in WalkDir::new(&self.path) {
-            let entry = entry.map_err(|e| RetrievingDataError(e.to_string()))?; // Пытаемся получить объект директории
-            if entry.path().is_file() {
-                // Проверяем, что объект является файлом
-                let content = fs::read(entry.path()).await.unwrap(); // Читаем содержимое файла
-                let h = self.hasher.calc_hash_for_chunk(&content); // Вычисляем хэш-сумму данных
-                if hash.eq(&h) {
-                    // Если вычисленный хэш равен эталонному
-                    return Ok((PathBuf::from(entry.path()), content)); // Возвращаем путь к файлу и его содержимое
-                }
-            }
-        }
-        Err(RetrievingDataError(format!("hash not found: {}", hash))) // В противном случае возвращаем ошибку
+        self.state.hashes.contains_key(hash) // В противном случае возвращаем ошибку
     }
 }
 
 impl ServerStorage for UdpServerStorage {
     // Реализация трейта для структуры
-    async fn save(&self, hash: &str, data: &[u8]) -> Result<(), SavingDataError> {
+    async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         // Реализация метода сохранения данных на диске
         let hash = String::from(hash); // Переводим хэш в String
 
-        if let Ok(_) = self.search_for_hash(&hash).await {
+        if self.is_hash_presented(&hash) {
             // Если такой хэш уже представлен в хранилище
-            return Err(SavingDataError(format!(
+            return Err(Box::new(SavingDataError(format!(
                 "Hash {} already presents file",
                 hash,
-            ))); // Возвращаем ошибку
+            )))); // Возвращаем ошибку
         }
 
         let filename = self.path.join(format!("{}.bin", Uuid::new_v4())); // Создаем имя нового файла при помощи UUIDv4
         fs::write(&filename, data)
             .await
-            .map_err(|e| SavingDataError(e.to_string())) // Записываем данные в файл
+            .map_err(|e| SavingDataError(e.to_string()))?; // Записываем данные в файл
+
+        self.state.hashes.insert(hash, filename);
+        Ok(())
     }
 
-    async fn get(&self, hash: &str) -> Result<Vec<u8>, RetrievingDataError> {
+    async fn get(&mut self, hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Реализация метода получения данных из хранилища
-        if let Ok((p, c)) = self.search_for_hash(hash).await {
+        if self.is_hash_presented(hash) {
             // Если такой хэш есть в хранилище
-            fs::remove_file(&p)
-                .await
-                .map_err(|e| RetrievingDataError(e.to_string()))?; // Удаляем файл
-            return Ok(c); // Возвращаем его содержимое
+            let path = self.state.hashes.remove(hash).unwrap();
+            let data = fs::read(&path).await?;
+            fs::remove_file(path).await?;
+            return Ok(data);
         }
-        Err(RetrievingDataError(format!(
+        Err(Box::new(RetrievingDataError(format!(
             // Иначе возвращаем ошибку
             "No data for hash sum {}",
             hash,
-        )))
+        ))))
     }
 
-    async fn can_save(&self) -> Result<bool, SavingDataError> {
+    fn can_save(&self) -> bool {
         // Реализация метода проверки возможности сохранения файла
-        Ok(self
-            .get_occupied_space()
-            .await
-            .map_err(|e| SavingDataError(e.to_string()))?
-            < MAX_OCCUPIED_SPACE)
+        self.get_occupied_space() < MAX_OCCUPIED_SPACE
     }
 }
 

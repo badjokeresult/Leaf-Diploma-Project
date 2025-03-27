@@ -20,6 +20,8 @@ mod consts {
     pub const APP_DIR: &str = "leaf"; // Директория приложения
     #[cfg(target_os = "linux")]
     pub const CHUNKS_DIR: &str = "chunks"; // Директория чанков
+    #[cfg(target_os = "linux")]
+    pub const STATE_FILE: &str = "last_state.bin";
 
     #[cfg(target_os = "windows")]
     pub const APPS_DIR_ABS_PATH: &str = "C:\\Program Files"; // Корень директории с приложениями
@@ -33,15 +35,15 @@ mod consts {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket = Socket::new().await?; // Создаем объект сокета
 
-    let path = PathBuf::from(APPS_DIR_ABS_PATH)
-        .join(APP_DIR)
-        .join(CHUNKS_DIR);
-    let storage = UdpServerStorage::new(path);
+    let base_path = PathBuf::from(APPS_DIR_ABS_PATH).join(APP_DIR);
+    let stor_path = base_path.join(CHUNKS_DIR);
+    let state_path = base_path.join(STATE_FILE);
+    let storage = UdpServerStorage::new(stor_path, state_path).await?;
     let socket_clone = socket.clone();
-    let storage_clone = storage.clone(); // Клонируем поля для корректного перемещения в поток
+    let mut storage_clone = storage.clone(); // Клонируем поля для корректного перемещения в поток
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     tokio::spawn(async move {
-        packet_handler(rx, &storage_clone, &socket_clone).await;
+        packet_handler(rx, &mut storage_clone, &socket_clone).await;
     });
 
     loop {
@@ -49,54 +51,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn packet_handler(mut rx: Receiver<Packet>, storage: &UdpServerStorage, socket: &Socket) {
+async fn packet_handler(mut rx: Receiver<Packet>, storage: &mut UdpServerStorage, socket: &Socket) {
     // Функция-обработчик сообщений
     while let Some(p) = rx.recv().await {
         // Ожидание новых данных из канала в сокете
-        if let Err(e) = process_packet(p, storage, socket).await {
-            // Обрабатываем пакет и проверяем наличие ошибок
-            eprintln!("{}", e.to_string()); // При наличии ошибок пишем их в stderr, но не прерываем поток
-        };
+        process_packet(p, storage, &socket).await;
     }
 }
 
 async fn process_packet(
     // Функция обработки отдельного пакета
     packet: Packet,
-    storage: &UdpServerStorage,
+    storage: &mut UdpServerStorage,
     socket: &Socket,
-) -> Result<(), Box<dyn std::error::Error>> {
+) {
     let (data, addr) = packet.deconstruct(); // Разбираем пакет на данные и адрес источника
-    let message = Message::from_bytes(data)?; // Восстанавливаем сообщение из потока байт
+    let message = Message::from_bytes(data).unwrap(); // Восстанавливаем сообщение из потока байт
     match message.clone() {
         Message::SendingReq(h) => {
             // Если сообщение является запросом на хранение
-            if storage.can_save().await? {
+            if storage.can_save() {
                 // Проверка доступного места на диске
-                let ack = Message::SendingAck(h).into_bytes()?; // Создание сообщения подтверждения хранения и перевод его в поток байт
+                let ack = Message::SendingAck(h).into_bytes().unwrap(); // Создание сообщения подтверждения хранения и перевод его в поток байт
                 let packet = Packet::new(ack, addr); // Сбор нового пакета
-                socket.send(packet).await?; // Отправка пакета сокету
-                return Ok(()); // Возврат
+                socket.send(packet).await; // Отправка пакета сокету
             }
-            Err(Box::new(NoFreeSpaceError)) // Если места нет - возвращаем соответствующую ошибку
+            eprintln!(
+                "{:?}",
+                Err::<(), Box<errors::NoFreeSpaceError>>(Box::new(NoFreeSpaceError))
+            ) // Если места нет - возвращаем соответствующую ошибку
         }
         Message::RetrievingReq(h) => {
             // Если сообщение является запросом на получение
             if let Ok(d) = storage.get(&h).await {
                 // Если в хранилище есть такой хэш
-                let message = Message::ContentFilled(h.clone(), d).into_bytes()?; // Создание сообщения с данными и перевод его в поток байт
+                let message = Message::ContentFilled(h.clone(), d).into_bytes().unwrap(); // Создание сообщения с данными и перевод его в поток байт
                 let packet = Packet::new(message, addr); // Сбор нового пакета
-                socket.send(packet).await?; // Отправка пакета в сокет
-                return Ok(()); // Возврат
+                socket.send(packet).await; // Возврат
             }
-            Err(Box::new(NoHashError(h))) // Если в хранилище нет такого хэша - возвращаем соответствующую ошибку
+            eprintln!(
+                "{:?}",
+                Err::<(), Box<errors::NoHashError>>(Box::new(NoHashError(h)))
+            ) // Если в хранилище нет такого хэша - возвращаем соответствующую ошибку
         }
         Message::ContentFilled(h, d) => {
             // Если сообщение содержит данные
-            storage.save(&h, &d).await?; // Сохраняем данные на диске
-            Ok(()) // Возврат
+            println!("Got a content, saving...");
+            storage.save(&h, &d).await;
         }
-        _ => Err(Box::new(InvalidMessageError)), // Если пришли любые другие данные - возвращаем ошибку
+        _ => eprintln!(
+            "{:?}",
+            Err::<(), Box<errors::InvalidMessageError>>(Box::new(InvalidMessageError))
+        ), // Если пришли любые другие данные - возвращаем ошибку
     }
 }
 
