@@ -15,8 +15,8 @@ mod consts {
 
 pub trait ServerStorage {
     // Трейт серверного хранилища
-    async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>>; // Шаблон метода сохранения данных
-    async fn get(&mut self, hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>>; // Шаблон метода получения данных
+    async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), SavingDataError>; // Шаблон метода сохранения данных
+    async fn get(&mut self, hash: &str) -> Result<Vec<u8>, RetrievingDataError>; // Шаблон метода получения данных
     fn can_save(&self) -> bool; // Шаблон метода проверки возможности сохранения
 }
 
@@ -78,16 +78,16 @@ impl UdpServerStorage {
 
 impl ServerStorage for UdpServerStorage {
     // Реализация трейта для структуры
-    async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), SavingDataError> {
         // Реализация метода сохранения данных на диске
         let hash = String::from(hash); // Переводим хэш в String
 
         if self.is_hash_presented(&hash) {
             // Если такой хэш уже представлен в хранилище
-            return Err(Box::new(SavingDataError(format!(
+            return Err(SavingDataError(format!(
                 "Hash {} already presents file",
                 hash,
-            )))); // Возвращаем ошибку
+            ))); // Возвращаем ошибку
         }
 
         let filename = self.path.join(format!("{}.bin", Uuid::new_v4())); // Создаем имя нового файла при помощи UUIDv4
@@ -99,20 +99,23 @@ impl ServerStorage for UdpServerStorage {
         Ok(())
     }
 
-    async fn get(&mut self, hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    async fn get(&mut self, hash: &str) -> Result<Vec<u8>, RetrievingDataError> {
         // Реализация метода получения данных из хранилища
         if self.is_hash_presented(hash) {
             // Если такой хэш есть в хранилище
-            let path = self.state.hashes.remove(hash).unwrap();
-            let data = fs::read(&path).await?;
-            fs::remove_file(path).await?;
+            let path = self.state.hashes.remove(hash).map_or(
+                Err(RetrievingDataError(String::from("No such hash was found"))),
+                |x| Ok(x),
+            )?;
+            let data = fs::read(&path)
+                .await
+                .map_err(|e| RetrievingDataError(e.to_string()))?;
+            if let Err(e) = fs::remove_file(&path).await {
+                eprintln!("Error removing file {}: {}", path.display(), e.to_string());
+            }
             return Ok(data);
         }
-        Err(Box::new(RetrievingDataError(format!(
-            // Иначе возвращаем ошибку
-            "No data for hash sum {}",
-            hash,
-        ))))
+        Err(RetrievingDataError(String::from("No such hash was found")))
     }
 
     fn can_save(&self) -> bool {

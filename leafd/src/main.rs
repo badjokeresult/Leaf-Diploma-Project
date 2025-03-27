@@ -1,7 +1,7 @@
 mod socket; // Объявление внутреннего модуля сокета
 mod stor; // Объявление внутреннего модуля хранилища
 
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use socket::{Packet, Socket};
 use stor::{ServerStorage, UdpServerStorage};
@@ -69,41 +69,68 @@ async fn process_packet(
     let message = Message::from_bytes(data).unwrap(); // Восстанавливаем сообщение из потока байт
     match message.clone() {
         Message::SendingReq(h) => {
-            // Если сообщение является запросом на хранение
-            if storage.can_save() {
-                // Проверка доступного места на диске
-                let ack = Message::SendingAck(h).into_bytes().unwrap(); // Создание сообщения подтверждения хранения и перевод его в поток байт
-                let packet = Packet::new(ack, addr); // Сбор нового пакета
-                socket.send(packet).await; // Отправка пакета сокету
+            if let Err(e) = send_sending_ack(h.clone(), addr, socket, storage).await {
+                eprintln!("{}", e.to_string());
             }
-            eprintln!(
-                "{:?}",
-                Err::<(), Box<errors::NoFreeSpaceError>>(Box::new(NoFreeSpaceError))
-            ) // Если места нет - возвращаем соответствующую ошибку
         }
         Message::RetrievingReq(h) => {
-            // Если сообщение является запросом на получение
-            if let Ok(d) = storage.get(&h).await {
-                // Если в хранилище есть такой хэш
-                let message = Message::ContentFilled(h.clone(), d).into_bytes().unwrap(); // Создание сообщения с данными и перевод его в поток байт
-                let packet = Packet::new(message, addr); // Сбор нового пакета
-                socket.send(packet).await; // Возврат
+            if let Err(e) = send_content_filled(h.clone(), addr, socket, storage).await {
+                eprintln!("{}", e.to_string());
             }
-            eprintln!(
-                "{:?}",
-                Err::<(), Box<errors::NoHashError>>(Box::new(NoHashError(h)))
-            ) // Если в хранилище нет такого хэша - возвращаем соответствующую ошибку
         }
         Message::ContentFilled(h, d) => {
             // Если сообщение содержит данные
-            println!("Got a content, saving...");
-            storage.save(&h, &d).await;
+            if let Err(e) = storage.save(&h, &d).await {
+                eprintln!("{}", e.to_string());
+            };
         }
         _ => eprintln!(
             "{:?}",
-            Err::<(), Box<errors::InvalidMessageError>>(Box::new(InvalidMessageError))
+            Err::<(), Box<InvalidMessageError>>(Box::new(InvalidMessageError))
         ), // Если пришли любые другие данные - возвращаем ошибку
     }
+}
+
+async fn send_sending_ack(
+    hash: String,
+    addr: SocketAddr,
+    socket: &Socket,
+    storage: &UdpServerStorage,
+) -> Result<(), SendingAckError> {
+    if storage.can_save() {
+        // Проверка доступного места на диске
+        let ack = Message::SendingAck(hash)
+            .into_bytes()
+            .map_err(|e| SendingAckError(e.to_string()))?; // Создание сообщения подтверждения хранения и перевод его в поток байт
+        let packet = Packet::new(ack, addr); // Сбор нового пакета
+        socket
+            .send(packet)
+            .await
+            .map_err(|e| SendingAckError(e.to_string()))? // Отправка пакета сокету
+    }
+    Err(SendingAckError(String::from(
+        "Not enough free space to store",
+    ))) // Если места нет - возвращаем соответствующую ошибку
+}
+
+async fn send_content_filled(
+    hash: String,
+    addr: SocketAddr,
+    socket: &Socket,
+    storage: &mut UdpServerStorage,
+) -> Result<(), SendingContentFilled> {
+    if let Ok(d) = storage.get(&hash).await {
+        // Если в хранилище есть такой хэш
+        let message = Message::ContentFilled(hash, d)
+            .into_bytes()
+            .map_err(|e| SendingContentFilled(e.to_string()))?; // Создание сообщения с данными и перевод его в поток байт
+        let packet = Packet::new(message, addr); // Сбор нового пакета
+        socket
+            .send(packet)
+            .await
+            .map_err(|e| SendingContentFilled(e.to_string()))?;
+    }
+    Err(SendingContentFilled(String::from("No hash was found")))
 }
 
 mod errors {
@@ -154,4 +181,26 @@ mod errors {
     }
 
     impl Error for ServerInitError {}
+
+    #[derive(Debug, Clone)]
+    pub struct SendingAckError(pub String);
+
+    impl fmt::Display for SendingAckError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Error sending SENDING_ACK: {}", self.0)
+        }
+    }
+
+    impl Error for SendingAckError {}
+
+    #[derive(Debug, Clone)]
+    pub struct SendingContentFilled(pub String);
+
+    impl fmt::Display for SendingContentFilled {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Error sending CONTENT_FILLED: {}", self.0)
+        }
+    }
+
+    impl Error for SendingContentFilled {}
 }
