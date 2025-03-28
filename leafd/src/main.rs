@@ -1,3 +1,5 @@
+#![allow(unused_mut)]
+
 mod socket;
 mod stor;
 
@@ -38,7 +40,9 @@ mod consts {
     pub const STATE_FILE: &str = "last_state.bin";
 }
 
-async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_server(
+    shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let socket = Socket::new().await?;
 
     let base_path = PathBuf::from(APPS_DIR_ABS_PATH).join(APP_DIR);
@@ -62,34 +66,43 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         packet_handler(rx, &mut storage_clone, &socket_clone).await;
     });
 
-    // Ожидаем сигнал завершения (SIGTERM или Ctrl+C)
-    #[cfg(target_os = "linux")]
-    {
-        let mut sigterm =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    match shutdown_rx {
+        Some(mut shutdown_rx) => {
+            tokio::select! {
+                _ = socket.recv(&tx) => {
 
-        tokio::select! {
-            _ = socket.recv(&tx) => {
-                // Основной цикл получения данных
-            }
-            _ = sigint.recv() => {
-                println!("Received Ctrl+C, shutting down...");
-            }
-            _ = sigterm.recv() => {
-                println!("Received SIGTERM, shutting down...");
+                }
+                _ = shutdown_rx => {
+                    println!("Shutting down...");
+                }
             }
         }
+        None => {
+            #[cfg(target_os = "linux")]
+            {
+                let mut sigterm =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+                let mut sigint =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
-        // Уведомляем systemd о начале завершения
-        sd_notify::notify(false, &[sd_notify::NotifyState::Stopping])
-            .map_err(|e| ServerInitError(e.to_string()))?;
-        println!("Notified systemd: STOPPING=1");
+                tokio::select! {
+                    _ = socket.recv(&tx) => {
+                // Основной цикл получения данных
+                    }
+                    _ = sigint.recv() => {
+                        println!("Received Ctrl+C, shutting down...");
+                    }
+                    _ = sigterm.recv() => {
+                        println!("Received SIGTERM, shutting down...");
+                    }
+                }
 
-        // Закрываем канал и ждем завершения задачи
-        drop(tx); // Закрываем отправитель, чтобы rx завершился
-        handler_task.await?;
-        storage.shutdown(state_path).await?;
+                // Уведомляем systemd о начале завершения
+                sd_notify::notify(false, &[sd_notify::NotifyState::Stopping])
+                    .map_err(|e| ServerInitError(e.to_string()))?;
+                println!("Notified systemd: STOPPING=1");
+            }
+        }
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -99,6 +112,9 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             socket.recv(&tx).await;
         }
     }
+    drop(tx); // Закрываем отправитель, чтобы rx завершился
+    handler_task.await?;
+    storage.shutdown(state_path).await?;
 
     println!("Server shut down gracefully");
     Ok(())
@@ -197,9 +213,67 @@ mod windows_service_impl {
     }
 
     fn service_main(_arguments: Vec<String>) {
-        if let Err(e) = run_service() {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let status_handle = Arc::new(
+            service_control_handler::register(
+                SERVICE_NAME,
+                move |control_event| match control_event {
+                    ServiceControl::Stop => {
+                        shutdown_tx
+                            .send(())
+                            .unwrap_or_else(|e| eprintln!("Failed to send shutdown signal: {}", e));
+                        ServiceControlHandlerResult::NoError
+                    }
+                    ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                    _ => ServiceControlHandlerResult::NotImplemented,
+                },
+            )
+            .expect("Failed to register service control handler"),
+        );
+
+        // Устанавливаем начальный статус службы
+        update_service_status(
+            &status_handle,
+            windows_service::service::ServiceState::Running,
+            0,
+        );
+
+        if let Err(e) = run_service(shutdown_rx) {
             eprintln!("Service failed: {}", e);
+            update_service_status(
+                &status_handle,
+                windows_service::service::ServiceState::Stopped,
+                1,
+            );
+        } else {
+            update_service_status(
+                &status_handle,
+                windows_service::service::ServiceState::Stopped,
+                0,
+            );
         }
+    }
+
+    fn update_service_status(
+        handle: &ServiceStatusHandle,
+        state: windows_service::service::ServiceState,
+        exit_code: u32,
+    ) {
+        handle
+            .set_service_status(windows_service::service::ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: state,
+                controls_accepted: if state == windows_service::service::ServiceState::Running {
+                    ServiceControlAccept::STOP
+                } else {
+                    ServiceControlAccept::empty()
+                },
+                exit_code,
+                checkpoint: 0,
+                wait_hint: Duration::from_secs(5),
+                process_id: None,
+            })
+            .unwrap_or_else(|e| eprintln!("Failed to update service status: {}", e));
     }
 
     fn run_service() -> Result<(), Box<dyn std::error::Error>> {
@@ -246,7 +320,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    run_server().await?;
+    run_server(None).await?;
     Ok(())
 }
 
