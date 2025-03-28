@@ -18,6 +18,7 @@ pub trait ServerStorage {
     async fn save(&mut self, hash: &str, data: &[u8]) -> Result<(), SavingDataError>; // Шаблон метода сохранения данных
     async fn get(&mut self, hash: &str) -> Result<Vec<u8>, RetrievingDataError>; // Шаблон метода получения данных
     fn can_save(&self) -> bool; // Шаблон метода проверки возможности сохранения
+    async fn shutdown(self, path: PathBuf) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -56,7 +57,7 @@ impl UdpServerStorage {
     // Реализация структуры
     pub async fn new(
         storage_path: PathBuf,
-        state_path: PathBuf,
+        state_path: &PathBuf,
     ) -> Result<UdpServerStorage, Box<dyn std::error::Error>> {
         // Конструктор
         Ok(UdpServerStorage {
@@ -121,6 +122,10 @@ impl ServerStorage for UdpServerStorage {
     fn can_save(&self) -> bool {
         // Реализация метода проверки возможности сохранения файла
         self.get_occupied_space() < MAX_OCCUPIED_SPACE
+    }
+
+    async fn shutdown(self, path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        self.state.shutdown(&path).await
     }
 }
 

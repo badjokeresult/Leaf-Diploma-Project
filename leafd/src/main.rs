@@ -1,17 +1,16 @@
-mod socket; // Объявление внутреннего модуля сокета
-mod stor; // Объявление внутреннего модуля хранилища
+mod socket;
+mod stor;
 
 use consts::*;
 use errors::*;
 use leafcommon::Message;
 use socket::{Packet, Socket};
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf};
 use stor::{ServerStorage, UdpServerStorage};
 use tokio::sync::mpsc::Receiver;
 
-// Добавляем зависимости для служб
 #[cfg(target_os = "linux")]
-use systemd::daemon; // Для уведомлений systemd
+use sd_notify;
 #[cfg(target_os = "windows")]
 use windows_service::{
     service::{ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceType},
@@ -19,7 +18,6 @@ use windows_service::{
     service_manager::{ServiceManager, ServiceManagerAccess},
 };
 
-// Константы для Linux и Windows
 mod consts {
     #[cfg(target_os = "linux")]
     pub const APPS_DIR_ABS_PATH: &str = "/var/local";
@@ -40,14 +38,13 @@ mod consts {
     pub const STATE_FILE: &str = "last_state.bin";
 }
 
-// Определяем основную логику сервера
 async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let socket = Socket::new().await?;
 
     let base_path = PathBuf::from(APPS_DIR_ABS_PATH).join(APP_DIR);
     let stor_path = base_path.join(CHUNKS_DIR);
     let state_path = base_path.join(STATE_FILE);
-    let storage = UdpServerStorage::new(stor_path, state_path).await?;
+    let storage = UdpServerStorage::new(stor_path, &state_path).await?;
     let socket_clone = socket.clone();
     let mut storage_clone = storage.clone();
     let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -55,28 +52,65 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     // Уведомляем systemd о готовности (только для Linux)
     #[cfg(target_os = "linux")]
     {
-        daemon::notify(false, vec![&("READY", "1")].into_iter())
+        sd_notify::notify(false, &[sd_notify::NotifyState::Ready])
             .map_err(|e| ServerInitError(e.to_string()))?;
         println!("Notified systemd: READY=1");
     }
 
-    tokio::spawn(async move {
+    // Запускаем обработчик пакетов в отдельной задаче
+    let handler_task = tokio::spawn(async move {
         packet_handler(rx, &mut storage_clone, &socket_clone).await;
     });
 
-    loop {
-        socket.recv(&tx).await;
+    // Ожидаем сигнал завершения (SIGTERM или Ctrl+C)
+    #[cfg(target_os = "linux")]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+        tokio::select! {
+            _ = socket.recv(&tx) => {
+                // Основной цикл получения данных
+            }
+            _ = sigint.recv() => {
+                println!("Received Ctrl+C, shutting down...");
+            }
+            _ = sigterm.recv() => {
+                println!("Received SIGTERM, shutting down...");
+            }
+        }
+
+        // Уведомляем systemd о начале завершения
+        sd_notify::notify(false, &[sd_notify::NotifyState::Stopping])
+            .map_err(|e| ServerInitError(e.to_string()))?;
+        println!("Notified systemd: STOPPING=1");
+
+        // Закрываем канал и ждем завершения задачи
+        drop(tx); // Закрываем отправитель, чтобы rx завершился
+        handler_task.await?;
+        storage.shutdown(state_path).await?;
     }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Для Windows или других платформ просто бесконечный цикл
+        loop {
+            socket.recv(&tx).await;
+        }
+    }
+
+    println!("Server shut down gracefully");
+    Ok(())
 }
 
-// Обработчик пакетов (без изменений)
 async fn packet_handler(mut rx: Receiver<Packet>, storage: &mut UdpServerStorage, socket: &Socket) {
     while let Some(p) = rx.recv().await {
         process_packet(p, storage, &socket).await;
     }
+    println!("Packet handler stopped");
 }
 
-// Обработка пакета (без изменений)
 async fn process_packet(packet: Packet, storage: &mut UdpServerStorage, socket: &Socket) {
     let (data, addr) = packet.deconstruct();
     let message = Message::from_bytes(data).unwrap();
@@ -103,7 +137,6 @@ async fn process_packet(packet: Packet, storage: &mut UdpServerStorage, socket: 
     }
 }
 
-// Отправка подтверждения (без изменений)
 async fn send_sending_ack(
     hash: String,
     addr: SocketAddr,
@@ -127,7 +160,6 @@ async fn send_sending_ack(
     }
 }
 
-// Отправка данных (без изменений)
 async fn send_content_filled(
     hash: String,
     addr: SocketAddr,
@@ -149,7 +181,6 @@ async fn send_content_filled(
     }
 }
 
-// Реализация службы для Windows
 #[cfg(target_os = "windows")]
 mod windows_service_impl {
     use super::*;
@@ -192,7 +223,7 @@ mod windows_service_impl {
             executable_path: std::env::current_exe()?,
             launch_arguments: vec![],
             dependencies: vec![],
-            account_name: None, // Локальная система
+            account_name: None,
             account_password: None,
         };
 
@@ -206,7 +237,6 @@ mod windows_service_impl {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Проверяем, запущен ли процесс как служба
     #[cfg(target_os = "windows")]
     {
         if std::env::args().any(|arg| arg == "--service") {
@@ -216,12 +246,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Обычный запуск (консольный режим или systemd)
     run_server().await?;
     Ok(())
 }
 
-// Модуль ошибок (без изменений)
 mod errors {
     use std::error::Error;
     use std::fmt;
